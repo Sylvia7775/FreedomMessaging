@@ -1,0 +1,353 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with avatar file data, profile info, and preferences",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "User's display name",
+          "maxLength": 100
+        },
+        "username": {
+          "type": "string",
+          "description": "Unique handle or username",
+          "maxLength": 50
+        },
+        "avatar": {
+          "type": "string",
+          "description": "User avatar image URL or optimized base64 data URL"
+        },
+        "avatarFileName": {
+          "type": "string",
+          "description": "Targeted user file original name",
+          "maxLength": 200
+        },
+        "avatarFileSize": {
+          "type": "string",
+          "description": "Uploaded file size formatted",
+          "maxLength": 50
+        },
+        "avatarUpdatedAt": {
+          "type": "string",
+          "description": "Timestamp of avatar upload",
+          "maxLength": 50
+        },
+        "bio": {
+          "type": "string",
+          "description": "User bio or freedom quote",
+          "maxLength": 250
+        },
+        "motherLanguage": {
+          "type": "string",
+          "description": "Mother language for automatic chat translation",
+          "maxLength": 50
+        },
+        "isOnline": {
+          "type": "boolean",
+          "description": "Online availability state"
+        },
+        "hideOnlineStatus": {
+          "type": "boolean",
+          "description": "Privacy setting to hide online status from other users"
+        },
+        "lastMessage": {
+          "type": "string",
+          "description": "Preview of last message or status",
+          "maxLength": 300
+        },
+        "time": {
+          "type": "string",
+          "description": "Last message timestamp label",
+          "maxLength": 50
+        },
+        "lastSeen": {
+          "type": "string",
+          "description": "Last seen indicator",
+          "maxLength": 50
+        },
+        "theme": {
+          "type": "string",
+          "description": "Preferred app theme",
+          "enum": ["light", "dark"]
+        },
+        "status": {
+          "type": "string",
+          "description": "User account status e.g. active, blocked, offline",
+          "maxLength": 50
+        },
+        "isBlocked": {
+          "type": "boolean",
+          "description": "Indicates whether contact is blocked by the user"
+        },
+        "blockedAt": {
+          "type": "string",
+          "description": "Timestamp when the contact was blocked",
+          "maxLength": 50
+        },
+        "statusText": {
+          "type": "string",
+          "description": "Status text or custom user presence",
+          "maxLength": 100
+        },
+        "location": {
+          "type": "string",
+          "description": "User location city and state/country e.g. New York,NY",
+          "maxLength": 100
+        },
+        "age": {
+          "type": "string",
+          "description": "User age",
+          "maxLength": 30
+        },
+        "gender": {
+          "type": "string",
+          "description": "User gender selection (Female or Male)",
+          "enum": ["Female", "Male"]
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 150
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "User phone number",
+          "maxLength": 50
+        },
+        "hidePhoneNumberPublic": {
+          "type": "boolean",
+          "description": "Whether the user has chosen to hide their phone number from public profile visitors"
+        },
+        "isTyping": {
+          "type": "boolean",
+          "description": "Real-time typing indicator flag for this contact"
+        },
+        "typingUpdatedAt": {
+          "type": "string",
+          "description": "Timestamp of last typing status change",
+          "maxLength": 50
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of update",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of creation",
+          "maxLength": 50
+        }
+      },
+      "required": ["id", "name", "avatar"]
+    },
+    "TypingIndicator": {
+      "title": "TypingIndicator",
+      "description": "Real-time typing indicator state synced across devices for a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "isContactTyping": { "type": "boolean" },
+        "isUserTyping": { "type": "boolean" },
+        "typingUserId": { "type": "string", "maxLength": 128 },
+        "typingUserName": { "type": "string", "maxLength": 100 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "chatId", "updatedAt"]
+    },
+    "AppBrandConfig": {
+      "title": "AppBrandConfig",
+      "description": "App branding configuration including name, favicon, and primary theme colors",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string" },
+        "faviconUrl": { "type": "string" },
+        "faviconFileName": { "type": "string" },
+        "primaryColor": { "type": "string" },
+        "primaryColorName": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "BannedUser": {
+      "title": "BannedUser",
+      "description": "User banned by admin with reason and timestamp",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "avatar": { "type": "string" },
+        "reason": { "type": "string" },
+        "bannedAt": { "type": "string" },
+        "bannedBy": { "type": "string" }
+      },
+      "required": ["id", "userId", "name", "reason"]
+    },
+    "ReportedUser": {
+      "title": "ReportedUser",
+      "description": "Report filed against a user requiring admin moderation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reportedUserId": { "type": "string" },
+        "reportedUserName": { "type": "string" },
+        "reportedUserAvatar": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "reason": { "type": "string" },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "status": { "type": "string", "enum": ["pending", "investigating", "resolved", "dismissed"] },
+        "createdAt": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "reportedUserId", "reportedUserName", "reason"]
+    },
+    "BlockedUserRecord": {
+      "title": "BlockedUserRecord",
+      "description": "Record of a contact blocked by user with timestamp and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "status": { "type": "string" },
+        "reason": { "type": "string" },
+        "blockedAt": { "type": "string" }
+      },
+      "required": ["userId", "status"]
+    },
+    "AppSticker": {
+      "title": "AppSticker",
+      "description": "Custom sticker uploaded by app admin with 10 uploads/day limit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "emoji": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "title": { "type": "string" },
+        "bgGradient": { "type": "string" },
+        "badgeText": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "uploadDate": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "bgGradient"]
+    },
+    "MediaInteraction": {
+      "title": "MediaInteraction",
+      "description": "Stores user like, favourite, rating stars, and share metrics for media attachments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "likesCount": { "type": "number" },
+        "isLiked": { "type": "boolean" },
+        "isFavorite": { "type": "boolean" },
+        "userRating": { "type": "number" },
+        "averageRating": { "type": "number" },
+        "totalRatings": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "ApkBuild": {
+      "title": "ApkBuild",
+      "description": "Stores generated Android APK versions, build metadata, and download hashes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "versionName": { "type": "string" },
+        "versionCode": { "type": "number" },
+        "buildType": { "type": "string" },
+        "appName": { "type": "string" },
+        "packageName": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "fileName": { "type": "string" },
+        "targetSdk": { "type": "string" },
+        "minSdk": { "type": "string" },
+        "status": { "type": "string" },
+        "sha256Checksum": { "type": "string" },
+        "downloadUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "notes": { "type": "string" },
+        "architectures": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "featuresIncluded": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["id", "versionName", "buildType", "fileName"]
+    },
+    "FriendInvitation": {
+      "title": "FriendInvitation",
+      "description": "Friend invitation sent to a specific invited user, visible and acceptable only by the invited user (not admin or other uninvited users)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "senderAvatar": { "type": "string" },
+        "invitedUserId": { "type": "string", "maxLength": 128 },
+        "invitedUserName": { "type": "string", "maxLength": 100 },
+        "invitedUserAvatar": { "type": "string" },
+        "nativeLanguage": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "respondedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "senderId", "invitedUserId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores user profiles, contact entries, and avatar media records."
+    },
+    "/friend_invitations/{invitationId}": {
+      "schema": "FriendInvitation",
+      "description": "Stores friend invitations visible and acceptable only by the invited user."
+    },
+    "/app_config/{configId}": {
+      "schema": "AppBrandConfig",
+      "description": "Stores global app branding, name, favicon and color settings."
+    },
+    "/app_stickers/{stickerId}": {
+      "schema": "AppSticker",
+      "description": "Stores custom stickers uploaded by admin with daily upload quota."
+    },
+    "/media_interactions/{mediaId}": {
+      "schema": "MediaInteraction",
+      "description": "Stores likes, favourites, share count, and star ratings for media preview items."
+    },
+    "/apk_builds/{buildId}": {
+      "schema": "ApkBuild",
+      "description": "Stores generated Android APK builds, download manifests, and version history."
+    },
+    "/banned_users/{banId}": {
+      "schema": "BannedUser",
+      "description": "Stores list of banned users."
+    },
+    "/reported_users/{reportId}": {
+      "schema": "ReportedUser",
+      "description": "Stores list of reported users."
+    },
+    "/blocked_users/{blockId}": {
+      "schema": "BlockedUserRecord",
+      "description": "Stores blocked contact records."
+    },
+    "/typing_indicators/{chatId}": {
+      "schema": "TypingIndicator",
+      "description": "Stores real-time typing status for each conversation across devices."
+    }
+  }
+}

@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="com.freedom.messaging" version="1.2.5" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+    <name>Freedom Messaging</name>
+    <description>
+        High-fidelity private messaging with real-time Firestore sync, 2FA Two-Factor Authentication, and multilingual translation.
+    </description>
+    <author email="MobilePhonesky987@gmail.com" href="https://ais-dev-ixlwbs3zoaq5ry5ymgcrpe-321081453456.europe-west2.run.app">
+        Freedom Messaging Engineering Team
+    </author>
+    <content src="index.html" />
+    <access origin="*" />
+    <allow-intent href="http://*/*" />
+    <allow-intent href="https://*/*" />
+    <allow-intent href="tel:*" />
+    <allow-intent href="sms:*" />
+    <allow-intent href="mailto:*" />
+    <allow-intent href="geo:*" />
+
+    <!-- Preferences -->
+    <preference name="ScrollEnabled" value="false" />
+    <preference name="android-minSdkVersion" value="24" />
+    <preference name="android-targetSdkVersion" value="34" />
+    <preference name="Orientation" value="portrait" />
+    <preference name="Fullscreen" value="false" />
+    <preference name="BackgroundColor" value="0xff0f172a" />
+    <preference name="AutoHideSplashScreen" value="true" />
+    <preference name="SplashScreenDelay" value="1500" />
+    <preference name="ShowSplashScreenSpinner" value="false" />
+
+    <!-- Android Platform Configuration & Permissions -->
+    <platform name="android">
+        <allow-intent href="market:*" />
+        <config-file target="AndroidManifest.xml" parent="/*">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.RECORD_AUDIO" />
+            <uses-permission android:name="android.permission.CAMERA" />
+            <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+            <uses-permission android:name="android.permission.VIBRATE" />
+            <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+            <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+            <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+        </config-file>
+        <preference name="AndroidXEnabled" value="true" />
+        <preference name="GradlePluginKotlinEnabled" value="true" />
+    </platform>
+</widget>

@@ -1,0 +1,6 @@
+{
+  "name": "WeedChat",
+  "description": "WeedChat — A modern, multilingual messaging app with real-time conversations, channels, voice notes, media sharing, and mother language translation.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

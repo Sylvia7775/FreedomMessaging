@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="chatGrad" x1="12%" y1="12%" x2="88%" y2="88%">
+      <stop offset="0%" stop-color="#F700FF" />
+      <stop offset="50%" stop-color="#9D00F0" />
+      <stop offset="100%" stop-color="#5200D1" />
+    </linearGradient>
+    <linearGradient id="dotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#AC00F5" />
+      <stop offset="100%" stop-color="#7B00DF" />
+    </linearGradient>
+  </defs>
+  <!-- Main outer gradient circle -->
+  <circle cx="256" cy="256" r="252" fill="url(#chatGrad)" />
+  <!-- White speech bubble with bottom-left tail matching chat-2.png -->
+  <path
+    d="M 256 122 C 330 122 390 178 390 248 C 390 318 330 374 256 374 C 239 374 222 371 207 366 L 124 390 L 143 317 C 129 297 122 273 122 248 C 122 178 182 122 256 122 Z"
+    fill="#FFFFFF"
+  />
+  <!-- Three purple dots inside the speech bubble -->
+  <circle cx="192" cy="254" r="21" fill="url(#dotGrad)" />
+  <circle cx="256" cy="254" r="21" fill="url(#dotGrad)" />
+  <circle cx="320" cy="254" r="21" fill="url(#dotGrad)" />
+</svg>

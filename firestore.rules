@@ -1,0 +1,139 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'avatar']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() <= 100 &&
+        data.avatar is string &&
+        (!('username' in data) || (data.username is string && data.username.size() <= 50)) &&
+        (!('bio' in data) || (data.bio is string && data.bio.size() <= 250)) &&
+        (!('motherLanguage' in data) || (data.motherLanguage is string && data.motherLanguage.size() <= 50)) &&
+        (!('isOnline' in data) || data.isOnline is bool) &&
+        (!('hideOnlineStatus' in data) || data.hideOnlineStatus is bool) &&
+        (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 300)) &&
+        (!('time' in data) || (data.time is string && data.time.size() <= 50)) &&
+        (!('avatarFileName' in data) || (data.avatarFileName is string && data.avatarFileName.size() <= 200)) &&
+        (!('avatarFileSize' in data) || (data.avatarFileSize is string && data.avatarFileSize.size() <= 50)) &&
+        (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+        (!('statusText' in data) || (data.statusText is string && data.statusText.size() <= 100)) &&
+        (!('location' in data) || (data.location is string && data.location.size() <= 100)) &&
+        (!('age' in data) || (data.age is string && data.age.size() <= 30) || data.age is number) &&
+        (!('gender' in data) || (data.gender is string && data.gender.size() <= 40)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
+        (!('socialLinks' in data) || data.socialLinks is list) &&
+        (!('isBlocked' in data) || data.isBlocked is bool) &&
+        (!('blockedAt' in data) || data.blockedAt == null || (data.blockedAt is string && data.blockedAt.size() <= 50)) &&
+        (!('isBanned' in data) || data.isBanned is bool) &&
+        (!('bannedReason' in data) || (data.bannedReason is string && data.bannedReason.size() <= 250)) &&
+        (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 50)) &&
+        (!('hidePhoneNumberPublic' in data) || data.hidePhoneNumberPublic is bool) &&
+        (!('isArchived' in data) || data.isArchived is bool) &&
+        (!('archivedAt' in data) || data.archivedAt == null || (data.archivedAt is string && data.archivedAt.size() <= 50)) &&
+        (!('isDeleted' in data) || data.isDeleted is bool) &&
+        (!('deletedAt' in data) || data.deletedAt == null || (data.deletedAt is string && data.deletedAt.size() <= 50)) &&
+        (!('isPinned' in data) || data.isPinned is bool) &&
+        (!('isTyping' in data) || data.isTyping is bool) &&
+        (!('typingUpdatedAt' in data) || data.typingUpdatedAt == null || (data.typingUpdatedAt is string && data.typingUpdatedAt.size() <= 50)) &&
+        (!('unreadCount' in data) || data.unreadCount is number) &&
+        (!('updatedAt' in data) || data.updatedAt is string);
+    }
+
+    function isValidTypingIndicator(data) {
+      return data.keys().hasAll(['id', 'chatId', 'updatedAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.chatId is string && data.chatId.size() <= 128 &&
+        (!('isContactTyping' in data) || data.isContactTyping is bool) &&
+        (!('isUserTyping' in data) || data.isUserTyping is bool) &&
+        (!('typingUserId' in data) || (data.typingUserId is string && data.typingUserId.size() <= 128)) &&
+        (!('typingUserName' in data) || (data.typingUserName is string && data.typingUserName.size() <= 100)) &&
+        (!('deviceSessionId' in data) || (data.deviceSessionId is string && data.deviceSessionId.size() <= 128)) &&
+        data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    match /typing_indicators/{chatId} {
+      allow read: if true;
+      allow create, update: if isValidId(chatId) && isValidTypingIndicator(incoming());
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isValidUser(incoming());
+      allow delete: if true;
+    }
+
+    match /app_config/{configId} {
+      allow read, write: if true;
+    }
+
+    match /app_stickers/{stickerId} {
+      allow read, write: if true;
+    }
+
+    match /media_interactions/{mediaId} {
+      allow read, write: if true;
+    }
+
+    match /apk_builds/{buildId} {
+      allow read, write: if true;
+    }
+
+    match /banned_users/{banId} {
+      allow read, write: if true;
+    }
+
+    match /reported_users/{reportId} {
+      allow read, write: if true;
+    }
+
+    match /blocked_users/{blockId} {
+      allow read, write: if true;
+    }
+
+    function isValidFriendInvitation(data) {
+      return data.keys().hasAll(['id', 'senderId', 'invitedUserId', 'status', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.senderId is string && data.senderId.size() <= 128 &&
+        data.invitedUserId is string && data.invitedUserId.size() <= 128 &&
+        data.senderId != data.invitedUserId &&
+        data.status in ['pending', 'accepted', 'declined'] &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    match /friend_invitations/{invitationId} {
+      allow read: if true;
+      allow create, update: if isValidId(invitationId) && isValidFriendInvitation(incoming());
+      allow delete: if false;
+    }
+
+    match /password_recovery_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    match /channel_live_streams/{streamId} {
+      allow read, write: if true;
+    }
+
+    match /channel_live_chats/{msgId} {
+      allow read, write: if true;
+    }
+
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
