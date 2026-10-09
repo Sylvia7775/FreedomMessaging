@@ -43,6 +43,7 @@ import { PasswordResetPage } from './components/PasswordResetPage';
 import { playDefaultAppNotificationBell } from './lib/notificationSound';
 import {
   FriendInvitationRecord,
+  canUserSeeAndAcceptInvitation,
   saveFriendInvitation,
   subscribeFriendInvitationsFromDb,
 } from './lib/friendInvitationAccess';
@@ -126,6 +127,14 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeMode>('light');
   const [motherLanguage, setMotherLanguage] = useState<string>('English');
   const [brandConfig, setBrandConfig] = useState<AppBrandConfig>(DEFAULT_BRAND_CONFIG);
+
+  // Global Toast Notification & Admin Auth State (declared at top before any effects or handlers)
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>(INITIAL_BANNED_USERS);
+  const [reportedUsers, setReportedUsers] = useState<ReportedUser[]>(INITIAL_REPORTED_USERS);
+  const [isAdminVerified, setIsAdminVerified] = useState<boolean>(false);
+  const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
+  const adminEmail = ADMIN_CREDENTIALS.email;
 
   const handleNavigateScreen = (screen: ScreenView, _footerTab?: FooterPageTab) => {
     if (
@@ -870,26 +879,6 @@ export default function App() {
       const notifyKey = `${inv.id}_${inv.createdAt}`;
       notifiedPendingIds.add(notifyKey);
 
-      const displayContactName = inv.invitedUserName || inv.senderName || 'New Friend';
-      const displayAvatar =
-        inv.invitedUserAvatar ||
-        inv.senderAvatar ||
-        getInitialsAvatar(displayContactName, '#7C3AED');
-
-      setFriendRequestReceivedToast({
-        id: inv.id,
-        contactId: inv.invitedUserId || inv.senderId,
-        senderName: inv.senderName || 'WeedChat User',
-        senderAvatar: inv.senderAvatar || displayAvatar,
-        invitedUserName: inv.invitedUserName || displayContactName,
-        invitedUserAvatar: displayAvatar,
-        nativeLanguage: inv.nativeLanguage || 'English',
-        invitation: inv,
-      });
-
-      // Play Official App Notification Bell Ringtone
-      playDefaultAppNotificationBell(brandConfig);
-
       // Update local contact status to pending
       setContacts((prev) =>
         prev.map((c) =>
@@ -899,11 +888,43 @@ export default function App() {
         )
       );
 
+      // Strict check: ONLY display the "Accept Friend Invite" pop-up to the invited person, NEVER to the person who invited a user
+      if (
+        !canUserSeeAndAcceptInvitation(
+          inv,
+          currentUser?.id,
+          isAdminVerified,
+          currentUser?.name
+        )
+      ) {
+        return;
+      }
+
+      const displayContactName = inv.invitedUserName || inv.senderName || 'New Friend';
+      const displayAvatar =
+        inv.invitedUserAvatar ||
+        inv.senderAvatar ||
+        getInitialsAvatar(displayContactName, '#7C3AED');
+
+      setFriendRequestReceivedToast({
+        id: inv.id,
+        contactId: inv.senderId || inv.invitedUserId,
+        senderName: inv.senderName || 'WeedChat User',
+        senderAvatar: inv.senderAvatar || displayAvatar,
+        invitedUserName: inv.invitedUserName || displayContactName,
+        invitedUserAvatar: displayAvatar,
+        nativeLanguage: inv.nativeLanguage || 'English',
+        invitation: inv,
+      });
+
+      // Play Official App Notification Bell Ringtone for the invited recipient
+      playDefaultAppNotificationBell(brandConfig);
+
       // Browser Notification API if granted
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         try {
           new Notification('New Friend Request on WeedChat 🔔', {
-            body: `${inv.senderName || 'A user'} sent a friend request to ${inv.invitedUserName || 'you'}!`,
+            body: `${inv.senderName || 'A user'} sent you a friend invite!`,
             icon: brandConfig.notificationIconUrl || brandConfig.faviconUrl || '/chat-2.svg',
           });
         } catch {}
@@ -980,7 +1001,7 @@ export default function App() {
       window.removeEventListener('freedom-friend-request-received', handleFriendRequestReceived);
       window.removeEventListener('freedom-friend-request-accepted', handleFriendRequestAccepted);
     };
-  }, [brandConfig]);
+  }, [brandConfig, currentUser?.id, currentUser?.name, isAdminVerified]);
 
   // New Chat / Group / Channel Modal
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
@@ -1020,16 +1041,6 @@ export default function App() {
       unsubTyping();
     };
   }, [selectedContact.id]);
-
-  // Global Toast Notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // App Admin & Brand Customization State (Admin logged out everywhere by default)
-  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>(INITIAL_BANNED_USERS);
-  const [reportedUsers, setReportedUsers] = useState<ReportedUser[]>(INITIAL_REPORTED_USERS);
-  const [isAdminVerified, setIsAdminVerified] = useState<boolean>(false);
-  const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
-  const adminEmail = ADMIN_CREDENTIALS.email;
 
   // App Custom Stickers State (persisted to Firestore collection `app_stickers`)
   const [customStickers, setCustomStickers] = useState<StickerItem[]>([]);
@@ -2646,6 +2657,7 @@ export default function App() {
             setTimeout(() => setToastMessage(null), 3200);
           }}
           isCurrentUserProfile={visitingContact.id === currentUser.id}
+          currentUser={currentUser}
           onDeleteMyAccount={(deletedUserId) => {
             setContacts((prev) => prev.filter((c) => c.id !== deletedUserId));
             setVisitingContact(null);
@@ -2722,8 +2734,14 @@ export default function App() {
         </div>
       )}
 
-      {/* New Friend Request Received Notification Banner */}
-      {friendRequestReceivedToast && (
+      {/* New Friend Request Received Notification Banner — Displayed ONLY to the Invited Person, NEVER to the Sender */}
+      {friendRequestReceivedToast &&
+        canUserSeeAndAcceptInvitation(
+          friendRequestReceivedToast.invitation,
+          currentUser?.id,
+          isAdminVerified,
+          currentUser?.name
+        ) && (
         <div
           id="friend-request-received-toast"
           className="fixed top-4 left-1/2 -translate-x-1/2 z-[105] w-[92%] max-w-sm p-3.5 rounded-2xl bg-slate-900/95 dark:bg-[#161C28]/95 backdrop-blur-md border border-amber-400/50 text-white shadow-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-200"
@@ -2731,8 +2749,8 @@ export default function App() {
           <div className="flex items-center gap-3 min-w-0">
             <div className="relative shrink-0">
               <img
-                src={friendRequestReceivedToast.invitedUserAvatar || friendRequestReceivedToast.senderAvatar}
-                alt={friendRequestReceivedToast.invitedUserName}
+                src={friendRequestReceivedToast.senderAvatar || friendRequestReceivedToast.invitedUserAvatar}
+                alt={friendRequestReceivedToast.senderName}
                 className="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow-sm"
               />
               <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-[10px] font-bold ring-2 ring-slate-900">
@@ -2741,11 +2759,10 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-extrabold text-amber-300 tracking-tight">
-                New Friend Request! 🔔
+                New Friend Invite! 🔔
               </p>
               <p className="text-[11px] text-slate-200 font-medium leading-snug">
-                <strong>{friendRequestReceivedToast.senderName}</strong> sent a friend request to{' '}
-                <strong>{friendRequestReceivedToast.invitedUserName}</strong>.
+                <strong>{friendRequestReceivedToast.senderName}</strong> sent you a friend invite.
               </p>
               <p className="text-[9px] text-emerald-400 font-semibold mt-0.5">
                 ♪ {brandConfig.notificationTuneName || 'WeedChat Official Bell Ringtone'}
@@ -2780,7 +2797,7 @@ export default function App() {
               }}
               className="px-2.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold active:scale-95 transition-all cursor-pointer"
             >
-              Accept
+              Accept Friend Invite
             </button>
             <button
               id="friend-request-toast-view-btn"

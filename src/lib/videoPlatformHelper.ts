@@ -681,3 +681,65 @@ export async function generateVideoFileThumbnail(
     };
   });
 }
+
+const AUTO_PLAY_CHAT_VIDEOS_STORAGE_KEY = 'freedom_auto_play_chat_videos_v1';
+const AUTO_PLAY_CHAT_VIDEOS_EVENT = 'freedom-auto-play-chat-videos-changed';
+
+/**
+ * Returns whether videos in the chat feed should auto-play.
+ * Defaults to false (OFF) to save mobile data and battery life until enabled by the user in Settings.
+ */
+export function getAutoPlayChatVideosSetting(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = localStorage.getItem(AUTO_PLAY_CHAT_VIDEOS_STORAGE_KEY);
+    if (raw === null) return false;
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Updates the chat feed video auto-play preference in localStorage and notifies all mounted listeners.
+ */
+export function setAutoPlayChatVideosSetting(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(AUTO_PLAY_CHAT_VIDEOS_STORAGE_KEY, String(Boolean(enabled)));
+    window.dispatchEvent(
+      new CustomEvent(AUTO_PLAY_CHAT_VIDEOS_EVENT, {
+        detail: { enabled: Boolean(enabled) },
+      })
+    );
+  } catch {}
+}
+
+/**
+ * Subscribes to changes to the chat feed video auto-play setting.
+ */
+export function subscribeAutoPlayChatVideosSetting(
+  callback: (enabled: boolean) => void
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const handler = (e: Event) => {
+    const customEvent = e as CustomEvent<{ enabled: boolean }>;
+    if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
+      callback(customEvent.detail.enabled);
+    } else {
+      callback(getAutoPlayChatVideosSetting());
+    }
+  };
+  const storageHandler = (e: StorageEvent) => {
+    if (e.key === AUTO_PLAY_CHAT_VIDEOS_STORAGE_KEY) {
+      callback(getAutoPlayChatVideosSetting());
+    }
+  };
+  window.addEventListener(AUTO_PLAY_CHAT_VIDEOS_EVENT, handler);
+  window.addEventListener('storage', storageHandler);
+  return () => {
+    window.removeEventListener(AUTO_PLAY_CHAT_VIDEOS_EVENT, handler);
+    window.removeEventListener('storage', storageHandler);
+  };
+}
+

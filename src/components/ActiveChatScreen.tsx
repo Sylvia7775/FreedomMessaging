@@ -62,6 +62,7 @@ import {
   Headphones,
   Edit2,
   Save,
+  BatteryCharging,
 } from 'lucide-react';
 import { ChatMessage, UserContact, ThemeMode, StickerItem, ActiveMediaItem, GroupParticipant, ChannelLiveChatMessage } from '../types';
 import {
@@ -70,6 +71,9 @@ import {
   optimizeUploadedImageFile,
   generateVideoFileThumbnail,
   createPlatformSvgThumbnail,
+  getAutoPlayChatVideosSetting,
+  setAutoPlayChatVideosSetting,
+  subscribeAutoPlayChatVideosSetting,
 } from '../lib/videoPlatformHelper';
 import { getStickerById } from '../data/stickersData';
 import { StickerItemCard } from './StickerItemCard';
@@ -861,6 +865,23 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
   // Media Player Modal State for playing videos and music/audio files
   const [activeMediaItem, setActiveMediaItem] = useState<ActiveMediaItem | null>(null);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+
+  // Auto-Play Chat Feed Videos Setting (Data & Battery Saver)
+  const [autoPlayChatVideos, setAutoPlayChatVideos] = useState<boolean>(() =>
+    getAutoPlayChatVideosSetting()
+  );
+  const [manuallyPlayingVideoIds, setManuallyPlayingVideoIds] = useState<Record<string, boolean>>({});
+  const [inlineMutedVideoIds, setInlineMutedVideoIds] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const unsub = subscribeAutoPlayChatVideosSetting((enabled) => {
+      setAutoPlayChatVideos(enabled);
+      if (!enabled) {
+        setManuallyPlayingVideoIds({});
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const handleOpenMedia = (msg: ChatMessage) => {
     const detectedPlatform = detectVideoPlatformFromText(
@@ -1973,6 +1994,41 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                       <span>Friendship & Engagement</span>
                     </button>
                   )}
+
+                  <button
+                    id="menu-toggle-video-autoplay-btn"
+                    type="button"
+                    onClick={() => {
+                      setIsMoreMenuOpen(false);
+                      const nextVal = !autoPlayChatVideos;
+                      setAutoPlayChatVideos(nextVal);
+                      setAutoPlayChatVideosSetting(nextVal);
+                      setReactionFeedback(
+                        nextVal
+                          ? '🎬 Video Auto-Play ON in Chat Feed'
+                          : '🔋 Video Auto-Play OFF (Data & Battery Saver Active)'
+                      );
+                      setTimeout(() => setReactionFeedback(null), 2600);
+                    }}
+                    className={`w-full px-4 py-3 text-left text-xs font-bold flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ${
+                      autoPlayChatVideos
+                        ? 'text-purple-500 dark:text-purple-400'
+                        : isDark
+                        ? 'text-slate-100'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {autoPlayChatVideos ? (
+                      <Video className="w-4 h-4 text-purple-400 shrink-0" />
+                    ) : (
+                      <BatteryCharging className="w-4 h-4 text-emerald-400 shrink-0" />
+                    )}
+                    <span>
+                      {autoPlayChatVideos
+                        ? 'Video Auto-Play: ON (Tap to Save Data)'
+                        : 'Video Auto-Play: OFF (Data & Battery Saver)'}
+                    </span>
+                  </button>
 
                   <button
                     id="menu-open-ai-voice-btn"
@@ -3104,13 +3160,32 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                             detectedVideoForText?.thumbnailUrl ||
                             msg.mediaUrl ||
                             fallbackSvgThumb;
+                          const playableStreamUrl =
+                            msg.videoUrl &&
+                            (msg.videoUrl.endsWith('.mp4') ||
+                              msg.videoUrl.startsWith('data:video') ||
+                              msg.videoUrl.startsWith('blob:') ||
+                              msg.videoUrl.includes('commondatastorage.googleapis.com'))
+                              ? msg.videoUrl
+                              : detectedVideoForText?.playableStreamUrl ||
+                                (msg.mediaUrl &&
+                                (msg.mediaUrl.endsWith('.mp4') ||
+                                  msg.mediaUrl.startsWith('data:video') ||
+                                  msg.mediaUrl.startsWith('blob:') ||
+                                  msg.mediaUrl.includes('commondatastorage.googleapis.com'))
+                                  ? msg.mediaUrl
+                                  : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+                          const isInlinePlaying = Boolean(
+                            autoPlayChatVideos || manuallyPlayingVideoIds[msg.id]
+                          );
+                          const isInlineMuted = inlineMutedVideoIds[msg.id] ?? true;
 
                           return (
                             <div
                               id={`video-thumb-card-${msg.id}`}
                               className="relative rounded-2xl overflow-hidden shadow-xl w-64 sm:w-72 group border border-slate-700/60 bg-slate-950 transition-all select-none"
                             >
-                              {/* Video Thumbnail Only (URL is never shown) */}
+                              {/* Video Feed Area: Auto-plays inline when enabled, or shows static thumbnail when Data & Battery Saver is active */}
                               <div
                                 onClick={() => handleOpenMedia(msg)}
                                 role="button"
@@ -3118,23 +3193,36 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                                 title={`Play ${cleanVideoCaption}`}
                                 className="relative w-full h-40 sm:h-44 cursor-pointer overflow-hidden bg-slate-900"
                               >
-                                <img
-                                  src={primaryThumb}
-                                  alt={cleanVideoCaption}
-                                  onError={(e) => {
-                                    const target = e.currentTarget;
-                                    if (target.src !== fallbackSvgThumb) {
-                                      target.src = fallbackSvgThumb;
-                                    }
-                                  }}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
+                                {isInlinePlaying ? (
+                                  <video
+                                    src={playableStreamUrl}
+                                    poster={primaryThumb}
+                                    autoPlay
+                                    muted={isInlineMuted}
+                                    loop
+                                    playsInline
+                                    preload="metadata"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <img
+                                    src={primaryThumb}
+                                    alt={cleanVideoCaption}
+                                    onError={(e) => {
+                                      const target = e.currentTarget;
+                                      if (target.src !== fallbackSvgThumb) {
+                                        target.src = fallbackSvgThumb;
+                                      }
+                                    }}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                )}
 
                                 {/* Dark gradient scrim */}
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/40" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/40 pointer-events-none" />
 
-                                {/* Top-Left: Platform Badge + Sender */}
-                                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                                {/* Top-Left: Platform Badge + Sender + Auto-Play / Data Saver state */}
+                                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 flex-wrap max-w-[80%]">
                                   <span
                                     style={{
                                       backgroundColor:
@@ -3148,63 +3236,102 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                                   <span className="bg-black/65 backdrop-blur-xs px-2 py-0.5 rounded-full text-[10px] font-bold text-white">
                                     {isMe ? 'You' : (msg.senderName || contact.name).split(' ')[0]}
                                   </span>
+                                  {isInlinePlaying ? (
+                                    <span className="bg-emerald-500/85 backdrop-blur-xs px-1.5 py-0.5 rounded-full text-[9px] font-extrabold text-white flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                      <span>{autoPlayChatVideos ? 'AUTO-PLAY' : 'PLAYING'}</span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="bg-slate-900/80 backdrop-blur-xs border border-emerald-500/40 px-1.5 py-0.5 rounded-full text-[9px] font-bold text-emerald-300 flex items-center gap-0.5"
+                                      title="Auto-play is off to save data and battery life"
+                                    >
+                                      <BatteryCharging className="w-2.5 h-2.5 text-emerald-400" />
+                                      <span>Data Saver</span>
+                                    </span>
+                                  )}
                                 </div>
 
-                                {/* Top-Right: Favourite / Like Heart (Adds to 3x3 User Profile Gallery!) */}
-                                <button
-                                  type="button"
-                                  id={`quick-fav-video-${msg.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const nextFav = !msg.isFavorite;
-                                    if (onToggleFavoriteMedia) {
-                                      onToggleFavoriteMedia(msg.id, nextFav);
-                                    }
-                                    if (nextFav) {
-                                      addMediaToLikedUserGallery({
-                                        id: msg.id,
-                                        messageId: msg.id,
-                                        type: 'video',
-                                        url: msg.videoUrl || msg.mediaUrl || '',
-                                        thumbnailUrl: primaryThumb,
-                                        title: cleanVideoCaption || 'Liked Video Clip',
-                                        senderName: isMe ? 'You' : msg.senderName || contact.name,
-                                        timestamp: msg.timestamp,
-                                        likesCount: 120000,
-                                        likesDisplay: '120K',
-                                        contactId: contact.id,
-                                      });
-                                      setReactionFeedback(
-                                        '❤️ Liked video & added to 3×3 User Profile Gallery (🤍 120K)!'
-                                      );
-                                      setTimeout(() => setReactionFeedback(null), 3000);
-                                    }
-                                  }}
-                                  className="absolute top-2.5 right-2.5 z-10 w-7 h-7 rounded-full bg-white/95 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-90"
-                                  title={
-                                    msg.isFavorite
-                                      ? 'Liked & in User Profile Gallery (120K)'
-                                      : 'Like & add to User Profile Gallery (🤍 120K)'
-                                  }
-                                >
-                                  <Heart
-                                    className={`w-3.5 h-3.5 transition-all duration-200 ${
+                                {/* Top-Right: Mute/Unmute (when auto-playing) + Favourite / Like Heart */}
+                                <div className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5">
+                                  {isInlinePlaying && (
+                                    <button
+                                      type="button"
+                                      id={`inline-mute-video-${msg.id}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setInlineMutedVideoIds((prev) => ({
+                                          ...prev,
+                                          [msg.id]: !(prev[msg.id] ?? true),
+                                        }));
+                                      }}
+                                      className="w-7 h-7 rounded-full bg-black/70 hover:bg-black/85 text-white shadow-md flex items-center justify-center transition-all cursor-pointer"
+                                      title={isInlineMuted ? 'Unmute inline video' : 'Mute inline video'}
+                                    >
+                                      {isInlineMuted ? (
+                                        <VolumeX className="w-3.5 h-3.5 text-slate-200" />
+                                      ) : (
+                                        <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                                      )}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    id={`quick-fav-video-${msg.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const nextFav = !msg.isFavorite;
+                                      if (onToggleFavoriteMedia) {
+                                        onToggleFavoriteMedia(msg.id, nextFav);
+                                      }
+                                      if (nextFav) {
+                                        addMediaToLikedUserGallery({
+                                          id: msg.id,
+                                          messageId: msg.id,
+                                          type: 'video',
+                                          url: msg.videoUrl || msg.mediaUrl || '',
+                                          thumbnailUrl: primaryThumb,
+                                          title: cleanVideoCaption || 'Liked Video Clip',
+                                          senderName: isMe ? 'You' : msg.senderName || contact.name,
+                                          timestamp: msg.timestamp,
+                                          likesCount: 120000,
+                                          likesDisplay: '120K',
+                                          contactId: contact.id,
+                                        });
+                                        setReactionFeedback(
+                                          '❤️ Liked video & added to 3×3 User Profile Gallery (🤍 120K)!'
+                                        );
+                                        setTimeout(() => setReactionFeedback(null), 3000);
+                                      }
+                                    }}
+                                    className="w-7 h-7 rounded-full bg-white/95 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-90"
+                                    title={
                                       msg.isFavorite
-                                        ? 'fill-red-500 text-red-500 scale-110'
-                                        : 'text-slate-500 hover:text-red-500'
-                                    }`}
-                                  />
-                                </button>
-
-                                {/* Center Smooth Play Button */}
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                  <div
-                                    style={{ backgroundColor: primaryColor }}
-                                    className="w-13 h-13 rounded-full text-white flex items-center justify-center shadow-2xl ring-4 ring-white/25 group-hover:scale-110 active:scale-95 transition-all"
+                                        ? 'Liked & in User Profile Gallery (120K)'
+                                        : 'Like & add to User Profile Gallery (🤍 120K)'
+                                    }
                                   >
-                                    <Play className="w-6 h-6 fill-white ml-0.5" />
-                                  </div>
+                                    <Heart
+                                      className={`w-3.5 h-3.5 transition-all duration-200 ${
+                                        msg.isFavorite
+                                          ? 'fill-red-500 text-red-500 scale-110'
+                                          : 'text-slate-500 hover:text-red-500'
+                                      }`}
+                                    />
+                                  </button>
                                 </div>
+
+                                {/* Center Smooth Play Button (shown when not auto-playing inline) */}
+                                {!isInlinePlaying && (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <div
+                                      style={{ backgroundColor: primaryColor }}
+                                      className="w-13 h-13 rounded-full text-white flex items-center justify-center shadow-2xl ring-4 ring-white/25 group-hover:scale-110 active:scale-95 transition-all"
+                                    >
+                                      <Play className="w-6 h-6 fill-white ml-0.5" />
+                                    </div>
+                                  </div>
+                                )}
 
                                 {/* Bottom-left Clean Video Title (NO URL shown) */}
                                 <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between gap-2">
@@ -3212,7 +3339,7 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                                     {cleanVideoCaption}
                                   </p>
                                   <span className="px-1.5 py-0.5 rounded bg-black/75 text-[9px] font-mono font-bold text-emerald-400 shrink-0">
-                                    HD PLAY
+                                    {isInlinePlaying ? 'LIVE FEED' : 'HD PLAY'}
                                   </span>
                                 </div>
                               </div>
@@ -3220,15 +3347,36 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                               {/* Bottom Action Bar: Play, Fullscreen, Rotate, Share, Save to Device */}
                               <div className="px-2.5 py-1.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-1">
                                 <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenMedia(msg)}
-                                    className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                                    title="Open Smooth Video Player (Full Screen & Rotate)"
-                                  >
-                                    <Play className="w-2.5 h-2.5 fill-current" />
-                                    <span>Play</span>
-                                  </button>
+                                  {!autoPlayChatVideos && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setManuallyPlayingVideoIds((prev) => ({
+                                          ...prev,
+                                          [msg.id]: !prev[msg.id],
+                                        }));
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                      title={
+                                        manuallyPlayingVideoIds[msg.id]
+                                          ? 'Pause inline video preview'
+                                          : 'Play inline in chat feed'
+                                      }
+                                    >
+                                      {manuallyPlayingVideoIds[msg.id] ? (
+                                        <>
+                                          <Pause className="w-2.5 h-2.5 fill-current" />
+                                          <span>Pause</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Play className="w-2.5 h-2.5 fill-current" />
+                                          <span>Play</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => handleOpenMedia(msg)}
@@ -3878,9 +4026,9 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                 {/* Current User Persistent Profile Thumbnail Avatar on Outgoing Messages */}
                 {isMe && (
                   <div
-                    onClick={() => onNavigate('profile')}
+                    onClick={onBack}
                     className="shrink-0 mb-1 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
-                    title="Your Persistent Profile Thumbnail • Tap to view Profile"
+                    title="Your Persistent Profile Thumbnail"
                   >
                     <img
                       src={getPersistentUserThumbnail(

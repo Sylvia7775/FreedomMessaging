@@ -280,8 +280,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
     const reqs = getAdminVerificationRequirements(targetUser);
     if (!reqs.meetsRequirements) {
       showToast(
-        `Cannot verify ${targetUser.name}: User must meet requirements (Profile Image or ID Document Picture).`,
-        'error'
+        `Cannot verify ${targetUser.name}: User must meet requirements (Profile Image or ID Document Picture).`
       );
       return;
     }

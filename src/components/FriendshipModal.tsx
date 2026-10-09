@@ -29,6 +29,7 @@ import {
   FriendInvitationRecord,
   canUserSeeAndAcceptInvitation,
   getInvitationForContact,
+  getLoggedInViewerIdentity,
   saveFriendInvitation,
 } from '../lib/friendInvitationAccess';
 
@@ -160,42 +161,51 @@ export const FriendshipModal: React.FC<FriendshipModalProps> = ({
     } catch {}
   }, [contact.id, contact.name, contact.avatar, contact.friendInviteStatus, currentUserName, currentUserAvatar, inviteStorageKey]);
 
-  const activeViewerUserId =
-    viewerRole === 'invited_user'
-      ? contact.id
-      : viewerRole === 'sender'
-      ? 'me'
-      : viewerRole === 'admin'
-      ? 'admin_user'
-      : 'other_uninvited_user';
-  const isViewerAdmin = viewerRole === 'admin';
+  const loggedInViewer = getLoggedInViewerIdentity();
   const isAllowedToSeeAndAcceptInvite = canUserSeeAndAcceptInvitation(
     invitationRecord,
-    activeViewerUserId,
-    isViewerAdmin
+    loggedInViewer.id,
+    false,
+    loggedInViewer.name
   );
 
   const handleUpdateInviteStatus = (nextStatus: 'none' | 'pending' | 'accepted', msg?: string) => {
     if (nextStatus === 'accepted' && !isAllowedToSeeAndAcceptInvite) {
       setFeedbackToast(
-        `Access Denied: Only the invited user (${contact.name}) can see and accept this invitation.`
+        `Only the invited person (${invitationRecord?.invitedUserName || contact.name}) can accept this friend invite.`
       );
       setTimeout(() => setFeedbackToast(null), 2800);
       return;
     }
     setFriendInviteStatus(nextStatus);
     const updatedRec: FriendInvitationRecord = {
-      id: `inv_me_${contact.id}`,
-      senderId: 'me',
-      senderName: currentUserName,
+      id: invitationRecord?.id || `inv_${loggedInViewer.id || 'me'}_${contact.id}`,
+      senderId:
+        nextStatus === 'pending'
+          ? loggedInViewer.id || 'me'
+          : invitationRecord?.senderId || loggedInViewer.id || 'me',
+      senderName:
+        nextStatus === 'pending'
+          ? loggedInViewer.name || currentUserName
+          : invitationRecord?.senderName || loggedInViewer.name || currentUserName,
       senderAvatar: currentUserAvatar,
-      invitedUserId: contact.id,
-      invitedUserName: contact.name,
-      invitedUserAvatar: contact.avatar,
+      invitedUserId:
+        nextStatus === 'pending'
+          ? contact.id
+          : invitationRecord?.invitedUserId || contact.id,
+      invitedUserName:
+        nextStatus === 'pending'
+          ? contact.name
+          : invitationRecord?.invitedUserName || contact.name,
+      invitedUserAvatar:
+        nextStatus === 'pending'
+          ? contact.avatar
+          : invitationRecord?.invitedUserAvatar || contact.avatar,
       nativeLanguage: contact.nativeLanguage || 'Spanish',
       status: nextStatus === 'none' ? 'declined' : nextStatus,
       createdAt: invitationRecord?.createdAt || new Date().toISOString(),
       respondedAt: nextStatus !== 'pending' ? new Date().toISOString() : undefined,
+      acceptedAt: nextStatus === 'accepted' ? new Date().toISOString() : undefined,
     };
     setInvitationRecord(updatedRec);
     saveFriendInvitation(updatedRec);
@@ -593,116 +603,48 @@ export const FriendshipModal: React.FC<FriendshipModalProps> = ({
             </div>
             )}
 
-            {friendInviteStatus === 'pending' && (
-              <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                <div className="flex flex-wrap items-center justify-between gap-1.5">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400">
-                    Viewing As:
+            {friendInviteStatus === 'pending' && isAllowedToSeeAndAcceptInvite && (
+              <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-slate-800 animate-in fade-in duration-150">
+                <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-[10px] text-emerald-400 font-bold flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Friend Invitation for {invitationRecord?.invitedUserName || loggedInViewer.name || 'You'}
                   </span>
-                  <div className="flex items-center gap-1 flex-wrap">
+                </div>
+                <div
+                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                    isDark
+                      ? 'bg-slate-900/80 border-emerald-500/30'
+                      : 'bg-white border-emerald-500/30'
+                  }`}
+                >
+                  <span className="text-[11px] font-semibold text-slate-300 dark:text-slate-200">
+                    Accept or decline this friend invitation
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
+                      id="friendship-modal-accept-invite-btn"
                       type="button"
-                      onClick={() => setViewerRole('sender')}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold cursor-pointer ${
-                        viewerRole === 'sender'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-slate-800/70 text-slate-400'
-                      }`}
+                      onClick={() =>
+                        handleUpdateInviteStatus(
+                          'accepted',
+                          `Friend Invite accepted! 🎉`
+                        )
+                      }
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      Sender
+                      <Check className="w-3 h-3 stroke-[2.5]" />
+                      <span>Accept Friend Invite</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => setViewerRole('invited_user')}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold cursor-pointer flex items-center gap-1 ${
-                        viewerRole === 'invited_user'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                      }`}
+                      onClick={() => handleUpdateInviteStatus('none', 'Friend invite declined.')}
+                      className="px-2 py-1 rounded-lg text-[10px] text-slate-400 hover:bg-slate-800 cursor-pointer"
                     >
-                      <Bell className="w-2.5 h-2.5" />
-                      <span>Invited ({contact.name.split(' ')[0]})</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewerRole('admin')}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold cursor-pointer ${
-                        viewerRole === 'admin'
-                          ? 'bg-rose-600 text-white'
-                          : 'bg-slate-800/70 text-slate-400'
-                      }`}
-                    >
-                      Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewerRole('other_user')}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold cursor-pointer ${
-                        viewerRole === 'other_user'
-                          ? 'bg-rose-600 text-white'
-                          : 'bg-slate-800/70 text-slate-400'
-                      }`}
-                    >
-                      Other User
+                      Decline
                     </button>
                   </div>
                 </div>
-
-                {isAllowedToSeeAndAcceptInvite ? (
-                  <div className="space-y-2 animate-in fade-in duration-150">
-                    <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-[10px] text-emerald-400 font-bold flex items-center gap-1.5">
-                      <Bell className="w-3.5 h-3.5 shrink-0" />
-                      <span>
-                        Invitation Notification for {contact.name} Only: {currentUserName} invited you!
-                      </span>
-                    </div>
-                    <div
-                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
-                        isDark
-                          ? 'bg-slate-900/80 border-emerald-500/30'
-                          : 'bg-white border-emerald-500/30'
-                      }`}
-                    >
-                      <span className="text-[11px] font-semibold text-slate-300 dark:text-slate-200">
-                        Invited User ({contact.name.split(' ')[0]}):
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          id="friendship-modal-accept-invite-btn"
-                          type="button"
-                          onClick={() =>
-                            handleUpdateInviteStatus(
-                              'accepted',
-                              `${contact.name} accepted the Friend Invite! 🎉`
-                            )
-                          }
-                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <Check className="w-3 h-3 stroke-[2.5]" />
-                          <span>Accept Invite</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateInviteStatus('none', 'Friend invite declined.')}
-                          className="px-2 py-1 rounded-lg text-[10px] text-slate-400 hover:bg-slate-800 cursor-pointer"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 text-[10px] text-slate-400 flex items-center gap-2">
-                    <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>
-                      {viewerRole === 'admin'
-                        ? `Hidden from Admin: Only ${contact.name} can see this invitation notification and accept it.`
-                        : viewerRole === 'other_user'
-                        ? `Hidden from Other Users: Uninvited users cannot see this invitation notification or accept it.`
-                        : `Only the invited user (${contact.name}) can see the invitation notification and accept it.`}
-                    </span>
-                  </div>
-                )}
               </div>
             )}
           </div>

@@ -4,7 +4,7 @@ import { BottomNav } from './BottomNav';
 import { Search, MessageSquare, Phone, Video, UserPlus, Globe, Smartphone, CheckCircle2, QrCode, User, Handshake, Users, Check, Mic, MicOff, X, Megaphone, Clock } from 'lucide-react';
 import { UserContact, ScreenView, ThemeMode } from '../types';
 import { FriendshipModal } from './FriendshipModal';
-import { saveFriendInvitation, getInvitationForContact } from '../lib/friendInvitationAccess';
+import { saveFriendInvitation, getInvitationForContact, getLoggedInViewerIdentity } from '../lib/friendInvitationAccess';
 import { saveContactOrChannelToDb } from '../lib/firebase';
 
 interface PeopleScreenProps {
@@ -615,10 +615,11 @@ export const PeopleScreen: React.FC<PeopleScreenProps> = ({
                           const currentStatus =
                             existing?.status || contact.friendInviteStatus || 'none';
                           if (currentStatus === 'none' || currentStatus === 'declined') {
+                            const viewer = getLoggedInViewerIdentity();
                             saveFriendInvitation({
-                              id: `inv_me_${contact.id}`,
-                              senderId: 'me',
-                              senderName: 'WeedChat User',
+                              id: `inv_${viewer.id || 'me'}_${contact.id}`,
+                              senderId: viewer.id || 'me',
+                              senderName: viewer.name || 'WeedChat User',
                               senderAvatar: userAvatar || contact.avatar,
                               invitedUserId: contact.id,
                               invitedUserName: contact.name,
@@ -642,7 +643,7 @@ export const PeopleScreen: React.FC<PeopleScreenProps> = ({
                           contact.friendInviteStatus === 'accepted'
                             ? 'Friends Connected'
                             : contact.friendInviteStatus === 'pending'
-                            ? 'Friend Request Pending (Click to view/accept)'
+                            ? 'Invite Sent (Waiting for invited user to accept)'
                             : `Send Friend Request to ${contact.name}`
                         }
                       >

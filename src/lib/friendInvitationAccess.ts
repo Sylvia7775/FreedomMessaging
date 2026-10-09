@@ -19,16 +19,42 @@ export interface FriendInvitationRecord {
 const INVITATIONS_STORAGE_KEY = 'freedom_friend_invitations_v2';
 
 /**
+ * Helper to resolve the currently logged-in user's ID and name from localStorage
+ */
+export function getLoggedInViewerIdentity(): { id: string; name: string } {
+  if (typeof window === 'undefined') {
+    return { id: 'me', name: '' };
+  }
+  try {
+    const raw = localStorage.getItem('freedom_active_auth_user_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          id: String(parsed.id || 'me'),
+          name: String(parsed.name || ''),
+        };
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return { id: 'me', name: '' };
+}
+
+/**
  * Strict Access Control Gate:
  * Returns true ONLY if the viewer is the exact invited user (`invitedUserId`)
- * and is NOT an Admin and NOT the sender or any other uninvited user.
+ * and is NOT the person who sent the invite (`senderId`), NOT an Admin, and NOT any other uninvited user.
  */
 export function canUserSeeAndAcceptInvitation(
   invitation: FriendInvitationRecord | null | undefined,
-  viewerUserId: string | null | undefined,
-  viewerRoleOrIsAdmin: boolean | 'invited_user' | 'sender' | 'admin' | 'other_user' = false
+  viewerUserId?: string | null,
+  viewerRoleOrIsAdmin: boolean | 'invited_user' | 'sender' | 'admin' | 'other_user' = false,
+  viewerUserName?: string | null
 ): boolean {
-  if (!invitation) return false;
+  if (!invitation || invitation.status !== 'pending') return false;
+
   // Admin or other uninvited users or sender cannot see or accept user friend invitations
   if (
     viewerRoleOrIsAdmin === true ||
@@ -38,13 +64,49 @@ export function canUserSeeAndAcceptInvitation(
   ) {
     return false;
   }
-  if (!viewerUserId || viewerUserId === 'admin' || viewerUserId === 'other_user' || viewerUserId === 'sender') {
+
+  const storedViewer = getLoggedInViewerIdentity();
+  const effectiveViewerId = (viewerUserId || storedViewer.id || '').trim();
+  const effectiveViewerName = (viewerUserName || storedViewer.name || '').trim().toLowerCase();
+
+  if (
+    !effectiveViewerId ||
+    effectiveViewerId === 'admin' ||
+    effectiveViewerId === 'other_user' ||
+    effectiveViewerId === 'sender'
+  ) {
     return false;
   }
-  // Sender cannot accept their own invitation
-  if (viewerUserId === invitation.senderId) return false;
-  // Only the specific invited user can see the invitation notification and accept it
-  return viewerUserId === invitation.invitedUserId;
+
+  const senderId = (invitation.senderId || '').trim();
+  const invitedUserId = (invitation.invitedUserId || '').trim();
+  const senderNameLower = (invitation.senderName || '').trim().toLowerCase();
+  const invitedNameLower = (invitation.invitedUserName || '').trim().toLowerCase();
+
+  // The person who invited a user (the sender) must NEVER see the Accept Friend Invite pop-up or button
+  if (
+    senderId === effectiveViewerId ||
+    ((senderId === 'me' || senderId === 'current_user') && invitedUserId !== effectiveViewerId) ||
+    (effectiveViewerName && senderNameLower && senderNameLower === effectiveViewerName)
+  ) {
+    return false;
+  }
+
+  // Only the specific invited person can see the invitation pop-up and click Accept Friend Invite
+  if (invitedUserId && effectiveViewerId === invitedUserId) {
+    return true;
+  }
+
+  if (
+    effectiveViewerName &&
+    invitedNameLower &&
+    effectiveViewerName === invitedNameLower &&
+    senderNameLower !== effectiveViewerName
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

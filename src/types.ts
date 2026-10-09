@@ -221,6 +221,7 @@ export interface UserProfile {
   idDocumentName?: string;
   verifiedByAdmin?: boolean;
   verifiedRewardedAt?: string;
+  autoPlayChatVideos?: boolean;
 }
 
 export interface MessageReaction {

@@ -44,6 +44,7 @@ import {
   FriendInvitationRecord,
   canUserSeeAndAcceptInvitation,
   getInvitationForContact,
+  getLoggedInViewerIdentity,
   saveFriendInvitation,
 } from '../lib/friendInvitationAccess';
 import { getCleanAvatar } from '../lib/avatarHelper';
@@ -81,6 +82,7 @@ interface UserProfileModalProps {
   allGroups?: UserContact[];
   onSelectGroup?: (group: UserContact) => void;
   isCurrentUserProfile?: boolean;
+  currentUser?: UserProfile | null;
   onDeleteMyAccount?: (deletedUserId: string) => void;
 }
 
@@ -143,6 +145,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   allGroups,
   onSelectGroup,
   isCurrentUserProfile = false,
+  currentUser,
   onDeleteMyAccount,
 }) => {
   const isDark = theme === 'dark';
@@ -653,6 +656,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   >('sender');
   const [inviteToast, setInviteToast] = useState<string | null>(null);
 
+  const loggedInViewer = React.useMemo(() => {
+    if (currentUser?.id) {
+      return { id: currentUser.id, name: currentUser.name || '' };
+    }
+    return getLoggedInViewerIdentity();
+  }, [currentUser?.id, currentUser?.name]);
+
   useEffect(() => {
     const existingRecord = getInvitationForContact(contact.id);
     if (existingRecord) {
@@ -672,10 +682,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         setFriendInviteStatus(saved);
         if (saved !== 'none') {
           const rec: FriendInvitationRecord = {
-            id: `inv_me_${contact.id}`,
-            senderId: 'me',
-            senderName: 'Sajol (You)',
+            id: `inv_${loggedInViewer.id || 'me'}_${contact.id}`,
+            senderId: loggedInViewer.id || 'me',
+            senderName: loggedInViewer.name || 'You',
             senderAvatar:
+              currentUser?.avatar ||
               'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
             invitedUserId: contact.id,
             invitedUserName: contact.name,
@@ -693,38 +704,62 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     } catch {
       setFriendInviteStatus('none');
     }
-  }, [contact.id, contact.name, contact.avatar, inviteStorageKey, (contact as UserContact).friendInviteStatus]);
+  }, [
+    contact.id,
+    contact.name,
+    contact.avatar,
+    inviteStorageKey,
+    (contact as UserContact).friendInviteStatus,
+    loggedInViewer.id,
+    loggedInViewer.name,
+    currentUser?.avatar,
+  ]);
 
   if (!isOpen) return null;
 
-  const activeViewerUserId =
-    viewerRole === 'invited_user'
-      ? contact.id
-      : viewerRole === 'sender'
-      ? 'me'
-      : viewerRole === 'admin'
-      ? 'admin_user'
-      : 'other_uninvited_user';
-  const isViewerAdmin = viewerRole === 'admin';
-
-  // Strict Access Check: ONLY the invited user (and NOT admin or other uninvited users) can see the invitation, notification, and accept it
+  // Strict Access Check: ONLY the invited person (and NEVER the person who sent the invite) can see the Accept Friend Invite pop-up and button
   const isAllowedToSeeAndAcceptInvite = canUserSeeAndAcceptInvitation(
     invitationRecord,
-    activeViewerUserId,
-    isViewerAdmin
+    loggedInViewer.id,
+    false,
+    loggedInViewer.name
   );
 
   const updateInviteStatus = (nextStatus: 'none' | 'pending' | 'accepted', toastMsg?: string) => {
+    if (nextStatus === 'accepted' && !isAllowedToSeeAndAcceptInvite) {
+      setInviteToast(
+        `Only the invited person (${invitationRecord?.invitedUserName || contact.name}) can accept this friend invite.`
+      );
+      setTimeout(() => setInviteToast(null), 3200);
+      return;
+    }
     setFriendInviteStatus(nextStatus);
     const updatedRec: FriendInvitationRecord = {
-      id: `inv_me_${contact.id}`,
-      senderId: 'me',
-      senderName: 'Sajol (You)',
+      id: invitationRecord?.id || `inv_${loggedInViewer.id || 'me'}_${contact.id}`,
+      senderId:
+        nextStatus === 'pending'
+          ? loggedInViewer.id || 'me'
+          : invitationRecord?.senderId || loggedInViewer.id || 'me',
+      senderName:
+        nextStatus === 'pending'
+          ? loggedInViewer.name || 'You'
+          : invitationRecord?.senderName || loggedInViewer.name || 'You',
       senderAvatar:
+        currentUser?.avatar ||
+        invitationRecord?.senderAvatar ||
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      invitedUserId: contact.id,
-      invitedUserName: contact.name,
-      invitedUserAvatar: contact.avatar,
+      invitedUserId:
+        nextStatus === 'pending'
+          ? contact.id
+          : invitationRecord?.invitedUserId || contact.id,
+      invitedUserName:
+        nextStatus === 'pending'
+          ? contact.name
+          : invitationRecord?.invitedUserName || contact.name,
+      invitedUserAvatar:
+        nextStatus === 'pending'
+          ? contact.avatar
+          : invitationRecord?.invitedUserAvatar || contact.avatar,
       nativeLanguage:
         (contact as UserProfile).motherLanguage ||
         (contact as UserContact).nativeLanguage ||
@@ -732,6 +767,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       status: nextStatus === 'none' ? 'declined' : nextStatus,
       createdAt: invitationRecord?.createdAt || new Date().toISOString(),
       respondedAt: nextStatus !== 'pending' ? new Date().toISOString() : undefined,
+      acceptedAt: nextStatus === 'accepted' ? new Date().toISOString() : undefined,
     };
     setInvitationRecord(updatedRec);
     saveFriendInvitation(updatedRec);
@@ -1304,7 +1340,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
       <div
         style={
-          !isGroup && userProfileWallpaperUrl
+          userProfileWallpaperUrl
             ? {
                 backgroundImage: `linear-gradient(to bottom, ${
                   isDark ? 'rgba(18, 22, 31, 0.85)' : 'rgba(255, 255, 255, 0.88)'
@@ -1327,38 +1363,47 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           style={{ WebkitOverflowScrolling: 'touch' }}
           className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y scroll-smooth flex flex-col"
         >
-        {/* Top Header Banner / Group Cover / User Profile Cover */}
+        {/* Top Header Banner / Channel Cover / Group Cover / User Profile Cover */}
         <div
           style={{ backgroundColor: primaryColor }}
-          className={`relative shrink-0 overflow-hidden ${
-            isGroup ? 'h-36 sm:h-48' : 'h-32 sm:h-40'
-          }`}
+          className="relative shrink-0 overflow-hidden h-32 sm:h-40"
         >
-          {isGroup && groupCoverUrl && (
-            <>
-              <img
-                id="group-page-cover-image"
-                src={groupCoverUrl}
-                alt={`${contact.name} Group Cover`}
-                className="w-full h-full object-cover transition-all duration-300"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-black/35" />
-            </>
+          {isGroup ? (
+            (userProfileCoverUrl || groupCoverUrl) && (
+              <>
+                <img
+                  id="group-page-cover-image"
+                  src={userProfileCoverUrl || groupCoverUrl}
+                  alt={`${contact.name} Group Cover`}
+                  className="w-full h-full object-cover transition-all duration-300"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
+              </>
+            )
+          ) : (
+            (userProfileCoverUrl ||
+              (contact as UserContact).profileCoverUrl ||
+              (contact as UserContact).groupCoverUrl ||
+              (isChannel ? customContactAvatar || contact.avatar : '')) && (
+              <>
+                <img
+                  id="user-profile-cover-image"
+                  src={
+                    userProfileCoverUrl ||
+                    (contact as UserContact).profileCoverUrl ||
+                    (contact as UserContact).groupCoverUrl ||
+                    customContactAvatar ||
+                    contact.avatar
+                  }
+                  alt={`${contact.name} Profile Cover`}
+                  className="w-full h-full object-cover transition-all duration-300"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
+              </>
+            )
           )}
 
-          {!isGroup && userProfileCoverUrl && (
-            <>
-              <img
-                id="user-profile-cover-image"
-                src={userProfileCoverUrl}
-                alt={`${contact.name} Profile Cover`}
-                className="w-full h-full object-cover transition-all duration-300"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
-            </>
-          )}
-
-          {/* Hidden File Input for Group Admin Cover Upload */}
+          {/* Hidden File Input for Group Cover Upload */}
           {isGroup && (
             <input
               ref={groupCoverInputRef}
@@ -1370,110 +1415,45 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             />
           )}
 
-          {/* Hidden File Inputs for Individual User Profile Cover & Wallpaper */}
-          {!isGroup && (
-            <>
-              <input
-                ref={userCoverInputRef}
-                id="user-profile-cover-upload-input"
-                type="file"
-                accept="image/*"
-                onChange={handleUserCoverUpload}
-                className="hidden"
-              />
-              <input
-                ref={userWallpaperInputRef}
-                id="user-profile-wallpaper-upload-input"
-                type="file"
-                accept="image/*"
-                onChange={handleUserWallpaperUpload}
-                className="hidden"
-              />
-            </>
-          )}
+          {/* Top Left Controls: Upload Profile Cover, Profile Wallpaper, Upload Wallpaper (Users, Channels & Groups) */}
+          <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 flex-wrap pr-12">
+            <button
+              id="upload-user-profile-cover-btn"
+              type="button"
+              onClick={() =>
+                isGroup
+                  ? groupCoverInputRef.current?.click()
+                  : userCoverInputRef.current?.click()
+              }
+              className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+              title="Upload Profile Cover Picture"
+            >
+              <Camera className="w-3.5 h-3.5 text-purple-300" />
+              <span>Upload Profile Cover</span>
+            </button>
 
-          {/* Top Left Badge & Controls: Group Cover vs User Profile Cover & Wallpaper */}
-          {isGroup ? (
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md text-white text-[10px] font-extrabold border border-white/20 flex items-center gap-1.5 shadow-sm">
-                <ImageIcon className="w-3 h-3 text-emerald-400" />
-                <span>Group Cover</span>
-              </span>
+            <button
+              id="customize-user-profile-wallpaper-btn"
+              type="button"
+              onClick={() => setShowCustomizeDrawer((prev) => !prev)}
+              className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+              title="Customize Profile Cover & Page Wallpaper"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Profile Wallpaper</span>
+            </button>
 
-              <button
-                id="toggle-group-admin-role-btn"
-                type="button"
-                onClick={() => setIsGroupAdminViewer((prev) => !prev)}
-                className={`px-2.5 py-1 rounded-full backdrop-blur-md text-[10px] font-bold border transition-all cursor-pointer flex items-center gap-1 ${
-                  isGroupAdminViewer
-                    ? 'bg-emerald-500/80 text-white border-emerald-300/50 shadow-sm'
-                    : 'bg-black/55 text-slate-200 border-white/20 hover:bg-black/70'
-                }`}
-                title="Switch viewer role to test Group Admin cover upload permission"
-              >
-                <Shield className="w-3 h-3" />
-                <span>{isGroupAdminViewer ? 'Role: Group Admin' : 'Role: Group Member'}</span>
-              </button>
-            </div>
-          ) : (
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 flex-wrap pr-12">
-              <button
-                id="upload-user-profile-cover-btn"
-                type="button"
-                onClick={() => userCoverInputRef.current?.click()}
-                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-                title="Upload User Profile Cover Picture"
-              >
-                <Camera className="w-3.5 h-3.5 text-purple-300" />
-                <span>Upload Profile Cover</span>
-              </button>
-
-              <button
-                id="customize-user-profile-wallpaper-btn"
-                type="button"
-                onClick={() => setShowCustomizeDrawer((prev) => !prev)}
-                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-                title="Customize User Profile Cover & Page Wallpaper"
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Profile Wallpaper</span>
-              </button>
-
-              <button
-                id="direct-upload-user-wallpaper-btn"
-                type="button"
-                onClick={() => userWallpaperInputRef.current?.click()}
-                className="px-3 py-1.5 rounded-full bg-emerald-600/90 hover:bg-emerald-500 backdrop-blur-md text-white text-[11px] font-extrabold border border-emerald-300/30 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-                title="Upload User Wallpaper"
-              >
-                <Upload className="w-3.5 h-3.5 text-white" />
-                <span>Upload Wallpaper</span>
-              </button>
-            </div>
-          )}
-
-          {/* Group Admin Upload Group Cover Button on Banner */}
-          {isGroup && (
-            <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2">
-              {isGroupAdminViewer ? (
-                <button
-                  id="upload-group-cover-banner-btn"
-                  type="button"
-                  onClick={() => groupCoverInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl bg-black/65 hover:bg-black/80 active:scale-95 text-white text-xs font-extrabold backdrop-blur-md border border-white/25 flex items-center gap-1.5 shadow-lg transition-all cursor-pointer"
-                  title="Upload custom Group Cover image (Group Admin)"
-                >
-                  <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Upload Group Cover</span>
-                </button>
-              ) : (
-                <span className="px-2.5 py-1 rounded-xl bg-black/55 text-slate-300 text-[10px] font-semibold backdrop-blur-md border border-white/15 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-amber-400" />
-                  <span>Admin Only Cover Upload</span>
-                </span>
-              )}
-            </div>
-          )}
+            <button
+              id="direct-upload-user-wallpaper-btn"
+              type="button"
+              onClick={() => userWallpaperInputRef.current?.click()}
+              className="px-3 py-1.5 rounded-full bg-emerald-600/90 hover:bg-emerald-500 backdrop-blur-md text-white text-[11px] font-extrabold border border-emerald-300/30 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+              title="Upload Wallpaper"
+            >
+              <Upload className="w-3.5 h-3.5 text-white" />
+              <span>Upload Wallpaper</span>
+            </button>
+          </div>
 
           <button
             id="close-user-profile-modal-btn"
@@ -1739,96 +1719,238 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   </button>
                 )}
 
-                {friendInviteStatus === 'pending' && (
-                  <span className="px-4 py-2.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5">
-                    <Clock className="w-4 h-4" />
-                    <span>Invite Sent</span>
-                  </span>
-                )}
+                {friendInviteStatus === 'pending' &&
+                  (isAllowedToSeeAndAcceptInvite ? (
+                    <button
+                      id="profile-header-accept-friend-invite-btn"
+                      type="button"
+                      onClick={handleAcceptFriendInviteAsInvitedUser}
+                      className="px-4 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Check className="w-4 h-4 stroke-[2.5]" />
+                      <span>Accept Friend Invite</span>
+                    </button>
+                  ) : (
+                    <span className="px-4 py-2.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                      <Clock className="w-4 h-4" />
+                      <span>Invite Sent</span>
+                    </span>
+                  ))}
               </div>
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-              <div className="flex flex-col items-center text-center sm:flex-row sm:items-start sm:text-left gap-3.5 w-full sm:w-auto">
-                <div className="relative shrink-0 group -mt-14 sm:-mt-12 z-10">
+            <div className="space-y-3.5">
+              {/* Avatar Overlapping Cover Banner (Left) + @username, Subscribers/Members & Location Row Below Cover (Right) — Matching Screenshot Style */}
+              <div className="flex items-start gap-3.5">
+                <div className="relative shrink-0 group -mt-12 sm:-mt-14 z-10">
                   <img
                     src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
                     alt={contact.name}
                     style={{ borderColor: primaryColor }}
-                    className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F]"
+                    className="w-26 h-26 sm:w-30 sm:h-30 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F]"
                   />
                   <button
                     id="modal-upload-avatar-camera-btn"
                     type="button"
                     onClick={() => userAvatarInputRef.current?.click()}
                     style={{ backgroundColor: primaryColor }}
-                    className="absolute bottom-1 right-1 w-8 h-8 rounded-full border-2 border-white dark:border-[#12161F] text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                    className="absolute bottom-0.5 right-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-white dark:border-[#12161F] text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
                     title="Upload & Auto-Save Avatar Photo"
                   >
                     <Camera className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="mb-1 sm:pt-2 flex flex-col items-center sm:items-start">
-                  <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
-                    <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight flex items-center gap-1.5">
-                      <span>{contact.name}</span>
-                    </h2>
-                    {isGroup ? (
-                      <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                        <Users className="w-3 h-3" />
-                        <span>Group ({groupParticipants.length} Members)</span>
-                      </span>
+                <div className="flex-1 min-w-0 pt-0.5 space-y-1.5">
+                  {/* Row 1: @username + Edit Pencil + Gender • Age Pill + Verified Badge */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!isEditingModalUsername ? (
+                      <button
+                        id="user-profile-username-display-btn"
+                        type="button"
+                        onClick={() => {
+                          setModalUsernameDraft(`@${username}`);
+                          setIsEditingModalUsername(true);
+                        }}
+                        style={{ color: primaryColor }}
+                        className="text-xs sm:text-sm font-mono font-bold flex items-center gap-1.5 hover:opacity-80 cursor-pointer"
+                        title="Click to edit @username"
+                      >
+                        <span className="truncate">@{username}</span>
+                        <Edit2 className="w-3.5 h-3.5 opacity-80 shrink-0" />
+                      </button>
                     ) : (
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                        <Megaphone className="w-3 h-3" />
-                        <span>Channel ({channelSubscribersCount} Subscribers)</span>
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <div
+                          className={`flex items-center rounded-lg border px-2 py-0.5 text-xs font-mono ${
+                            isDark
+                              ? 'bg-slate-800 border-slate-700 text-white'
+                              : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        >
+                          <span style={{ color: primaryColor }} className="font-bold select-none">
+                            @
+                          </span>
+                          <input
+                            id="user-profile-username-edit-input"
+                            type="text"
+                            value={modalUsernameDraft.replace(/^@+/, '')}
+                            onChange={(e) =>
+                              setModalUsernameDraft(`@${e.target.value.replace(/^@+/, '')}`)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveModalUsername();
+                              if (e.key === 'Escape') setIsEditingModalUsername(false);
+                            }}
+                            placeholder="username"
+                            className="bg-transparent outline-none w-28 text-xs font-mono"
+                          />
+                        </div>
+                        <button
+                          id="user-profile-username-save-btn"
+                          type="button"
+                          onClick={handleSaveModalUsername}
+                          style={{ backgroundColor: primaryColor }}
+                          className="p-1 rounded-md text-white cursor-pointer"
+                          title="Save @username"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingModalUsername(false)}
+                          className="p-1 rounded-md text-slate-400 hover:text-white cursor-pointer"
+                          title="Cancel"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
                     )}
-                    {isGroup && hasJoinedGroup && (
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                        <Check className="w-3 h-3 stroke-[2.5]" />
-                        <span>Joined</span>
-                      </span>
+
+                    <span className="inline-block text-[11px] px-2.5 py-0.5 rounded-full bg-slate-500/15 text-slate-500 dark:text-slate-300 font-semibold">
+                      {userGender} • {userAge} yrs
+                    </span>
+
+                    {isAccountProfileValidated(contact) && (
+                      <VerifiedCheckmarkBadge
+                        id="profile-modal-verified-badge"
+                        variant="profile_seal"
+                        title={`${contact.name} • Verified`}
+                      />
                     )}
                   </div>
-                  <p style={{ color: primaryColor }} className="text-xs font-mono font-semibold">
-                    {(contact as UserContact).groupTopic || 'Multilingual Group Page'}
-                  </p>
-                  <div className="mt-1 flex items-center justify-between gap-4 flex-wrap">
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                      <span style={{ backgroundColor: primaryColor }} className="w-1.5 h-1.5 rounded-full" />
-                      <span>{statusText}</span>
-                    </p>
+
+                  {/* Row 2: Purple Dot + Subscribers/Members & Category */}
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <span
+                      style={{ backgroundColor: primaryColor }}
+                      className="w-2 h-2 rounded-full shrink-0"
+                    />
+                    <span className="truncate">
+                      {isChannel
+                        ? `${channelSubscribersCount} ${
+                            channelSubscribersCount === 1 ? 'subscriber' : 'subscribers'
+                          } • ${
+                            (contact as UserContact).channelDescription ||
+                            (contact as UserContact).groupTopic ||
+                            'Entertainment'
+                          }`
+                        : `${groupParticipants.length} ${
+                            groupParticipants.length === 1 ? 'member' : 'members'
+                          } • ${(contact as UserContact).groupTopic || 'Entertainment'}`}
+                    </span>
+                  </div>
+
+                  {/* Row 3: Editable Location + Edit Pencil */}
+                  <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                    {!isEditingModalLocation ? (
+                      <button
+                        id="user-profile-location-display"
+                        type="button"
+                        onClick={() => {
+                          setModalLocationDraft(userLocation);
+                          setIsEditingModalLocation(true);
+                        }}
+                        className={`text-sm font-semibold tracking-tight flex items-center gap-1.5 hover:opacity-80 cursor-pointer transition-opacity ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                        title="Click to edit location"
+                      >
+                        <span>{userLocation || 'New York,NY'}</span>
+                        <Edit2 className="w-3.5 h-3.5 text-slate-400 opacity-75" />
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <input
+                          id="user-profile-location-edit-input"
+                          type="text"
+                          value={modalLocationDraft}
+                          onChange={(e) => setModalLocationDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveModalLocation();
+                            if (e.key === 'Escape') setIsEditingModalLocation(false);
+                          }}
+                          placeholder="e.g. New York,NY"
+                          className={`px-2 py-0.5 rounded-lg text-xs border outline-none w-32 ${
+                            isDark
+                              ? 'bg-slate-800 border-slate-700 text-white'
+                              : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        />
+                        <button
+                          id="user-profile-location-save-btn"
+                          type="button"
+                          onClick={handleSaveModalLocation}
+                          style={{ backgroundColor: primaryColor }}
+                          className="p-1 rounded-md text-white cursor-pointer"
+                          title="Save location"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {/* Action Pill Button Row Directly Below Avatar — Matching Screenshot Style */}
+              <div className="flex items-center gap-2.5 flex-wrap pt-1">
                 {isGroup ? (
                   <>
                     {hasJoinedGroup ? (
-                      <button
-                        id="group-page-leave-group-btn"
-                        type="button"
-                        onClick={handleLeaveGroupClick}
-                        className="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
-                        title="Leave the group"
-                      >
-                        <LogOut className="w-4 h-4 stroke-[2.5]" />
-                        <span>Leave the group</span>
-                      </button>
+                      <>
+                        <button
+                          id="group-page-joined-pill-btn"
+                          type="button"
+                          onClick={handleLeaveGroupClick}
+                          className="px-5 py-2.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-xs active:scale-95 transition-all cursor-pointer"
+                          title="Joined Group — click to leave group"
+                        >
+                          <Check className="w-4 h-4 stroke-[2.5]" />
+                          <span>Joined ({groupParticipants.length})</span>
+                        </button>
+                        <button
+                          id="group-page-leave-group-btn"
+                          type="button"
+                          onClick={handleLeaveGroupClick}
+                          className="px-4 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                          title="Leave the group"
+                        >
+                          <LogOut className="w-3.5 h-3.5 stroke-[2.5]" />
+                          <span>Leave the group</span>
+                        </button>
+                      </>
                     ) : (
                       <button
                         id="group-page-join-group-btn"
                         type="button"
                         onClick={handleJoinGroupClick}
                         style={{ backgroundColor: primaryColor }}
-                        className="px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                        className="px-5 py-2.5 rounded-full text-white text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
                         title="Join the group"
                       >
                         <Users className="w-4 h-4" />
-                        <span>Join Group</span>
+                        <span>Join Group ({groupParticipants.length})</span>
                       </button>
                     )}
                   </>
@@ -1838,10 +1960,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     type="button"
                     onClick={handleToggleChannelSubscribe}
                     style={isSubscribedToChannel ? undefined : { backgroundColor: primaryColor }}
-                    className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer ${
+                    className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-xs active:scale-95 transition-all cursor-pointer ${
                       isSubscribedToChannel
-                        ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/25'
-                        : 'text-white hover:brightness-110'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25'
+                        : 'text-white hover:brightness-110 shadow-md'
                     }`}
                     title={isSubscribedToChannel ? 'Subscribed — click to unsubscribe' : 'Subscribe to channel'}
                   >
@@ -1870,8 +1992,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* User Profile Cover & Wallpaper Customization Drawer (for Individual User Profile Page) */}
-          {!isGroup && showCustomizeDrawer && (
+          {/* Profile Cover & Wallpaper Customization Drawer (Users, Channels & Groups) */}
+          {showCustomizeDrawer && (
             <div
               className={`p-4 rounded-2xl border space-y-3 animate-in fade-in duration-150 ${
                 isDark ? 'bg-[#181D27]/95 border-slate-700' : 'bg-slate-50/95 border-slate-200'
@@ -2233,8 +2355,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* Friends Suggest Invitation Section (Individual User Only — hidden on Group Page & Channel Page) */}
-          {!isGroup && !isChannel && friendInviteStatus === 'pending' && (
+          {/* Friends Suggest Invitation Section — Displayed ONLY to the Invited Person, NEVER to the Person who invited a user */}
+          {!isGroup && !isChannel && friendInviteStatus === 'pending' && isAllowedToSeeAndAcceptInvite && (
             <div
               className={`p-4 rounded-2xl border space-y-2.5 ${
                 isDark ? 'bg-[#181D27] border-slate-800' : 'bg-slate-50 border-slate-200'
@@ -2256,13 +2378,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img
-                    src={contact.avatar}
-                    alt={contact.name}
+                    src={invitationRecord?.senderAvatar || contact.avatar}
+                    alt={invitationRecord?.senderName || contact.name}
                     className="w-9 h-9 rounded-full object-cover border border-emerald-500 shrink-0"
                   />
                   <div className="min-w-0">
                     <p className="text-xs font-bold truncate">
-                      Friend Invitation for {contact.name}
+                      Friend Invitation for {invitationRecord?.invitedUserName || loggedInViewer.name || contact.name}
                     </p>
                     <p className="text-[11px] text-slate-400">
                       Accept or decline this friend invitation
@@ -2274,7 +2396,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   <button
                     id="profile-accept-friend-invite-btn"
                     type="button"
-                    onClick={() => updateInviteStatus('accepted', `Connected with ${contact.name}! 🎉`)}
+                    onClick={handleAcceptFriendInviteAsInvitedUser}
                     className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5 stroke-[2.5]" />

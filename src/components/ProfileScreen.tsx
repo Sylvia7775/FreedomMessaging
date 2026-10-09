@@ -46,6 +46,8 @@ import {
   User as UserIcon,
   Fingerprint,
   Radio,
+  Video,
+  BatteryCharging,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { AVAILABLE_LANGUAGES, INITIAL_CONTACTS } from '../data/mockData';
@@ -92,7 +94,12 @@ import {
   getFingerprintRecord,
   setFingerprint2FAEnabled,
 } from '../lib/fingerprintAuthHelper';
-import { generateProfileThumbnailFile } from '../lib/videoPlatformHelper';
+import {
+  generateProfileThumbnailFile,
+  getAutoPlayChatVideosSetting,
+  setAutoPlayChatVideosSetting,
+  subscribeAutoPlayChatVideosSetting,
+} from '../lib/videoPlatformHelper';
 
 interface ProfileScreenProps {
   onNavigate: (screen: ScreenView) => void;
@@ -430,6 +437,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     getFingerprintRecord(currentUser.id)
   );
   const [isFingerprintModalOpen, setIsFingerprintModalOpen] = useState<boolean>(false);
+  const [autoPlayChatVideos, setAutoPlayChatVideos] = useState<boolean>(() => {
+    if (typeof currentUser.autoPlayChatVideos === 'boolean') {
+      return currentUser.autoPlayChatVideos;
+    }
+    return getAutoPlayChatVideosSetting();
+  });
 
   React.useEffect(() => {
     const syncAdultSetting = () => {
@@ -441,9 +454,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     const syncFingerprint = () => {
       setFingerprintRecord(getFingerprintRecord(currentUser.id));
     };
+    const unsubAutoPlay = subscribeAutoPlayChatVideosSetting((enabled) => {
+      setAutoPlayChatVideos(enabled);
+    });
     window.addEventListener('freedom-media-moderation-updated', syncAdultSetting);
     window.addEventListener('freedom-fingerprint-updated', syncFingerprint);
     return () => {
+      unsubAutoPlay();
       window.removeEventListener('freedom-media-moderation-updated', syncAdultSetting);
       window.removeEventListener('freedom-fingerprint-updated', syncFingerprint);
     };
@@ -543,17 +560,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       } as FriendInvitationRecord);
 
     if (status === 'accepted') {
-      const viewerRole =
-        activeViewerId === 'admin'
-          ? 'admin'
-          : activeViewerId === 'sender'
-          ? 'sender'
-          : activeViewerId === contactId
-          ? 'invited_user'
-          : 'other_user';
-      if (!canUserSeeAndAcceptInvitation(existingRecord, activeViewerId, viewerRole)) {
+      if (
+        !canUserSeeAndAcceptInvitation(
+          existingRecord,
+          currentUser.id,
+          isAdminVerified,
+          currentUser.name
+        )
+      ) {
         setFriendInviteFeedback(
-          `Access Denied: Only the invited user (${targetContact.name}) can see and accept this invitation — not Admin or other uninvited users.`
+          `Only the invited person (${existingRecord.invitedUserName || targetContact.name}) can accept this friend invite.`
         );
         setTimeout(() => setFriendInviteFeedback(null), 3500);
         return;
@@ -562,16 +578,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
     const updatedRecord: FriendInvitationRecord = {
       ...existingRecord,
+      senderId:
+        status === 'pending'
+          ? currentUser.id || 'current_user'
+          : existingRecord.senderId || currentUser.id || 'current_user',
+      senderName:
+        status === 'pending'
+          ? currentUser.name || 'You'
+          : existingRecord.senderName || currentUser.name || 'You',
+      invitedUserId:
+        status === 'pending'
+          ? contactId
+          : existingRecord.invitedUserId || contactId,
+      invitedUserName:
+        status === 'pending'
+          ? targetContact.name
+          : existingRecord.invitedUserName || targetContact.name,
       status,
       acceptedAt: status === 'accepted' ? new Date().toISOString() : undefined,
     };
     saveInvitationForContact(updatedRecord);
 
     setInviteStatusMap((prev) => ({ ...prev, [contactId]: status }));
-    if (status === 'pending') {
-      // Automatically switch viewer to the invited user so they can see their invitation notification and accept
-      setActiveViewerId(contactId);
-    }
     if (toastMsg) {
       setFriendInviteFeedback(toastMsg);
       setTimeout(() => setFriendInviteFeedback(null), 3000);
@@ -1952,6 +1980,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="space-y-2 pt-1">
             {individualContacts.map((contactItem) => {
               const status = inviteStatusMap[contactItem.id] || 'none';
+              const inviteRec = getInvitationForContact(contactItem.id);
+              const isViewerInvitedPerson = canUserSeeAndAcceptInvitation(
+                inviteRec,
+                currentUser.id,
+                isAdminVerified,
+                currentUser.name
+              );
 
               return (
                 <div
@@ -1980,7 +2015,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         {status === 'pending' && (
                           <span className="text-[9px] bg-amber-500/15 text-amber-500 px-1.5 py-0.2 rounded-full font-bold flex items-center gap-0.5">
                             <Clock className="w-2.5 h-2.5" />
-                            <span>Invite Sent</span>
+                            <span>{isViewerInvitedPerson ? 'Invited You' : 'Invite Sent'}</span>
                           </span>
                         )}
                       </div>
@@ -1988,7 +2023,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         {status === 'accepted'
                           ? 'Friend invite accepted'
                           : status === 'pending'
-                          ? `Invitation sent to ${contactItem.name.split(' ')[0]}`
+                          ? isViewerInvitedPerson
+                            ? `${contactItem.name.split(' ')[0]} sent you a friend invite`
+                            : `Invitation sent to ${contactItem.name.split(' ')[0]}`
                           : `${contactItem.nativeLanguage || 'English'} • Suggested friend`}
                       </p>
                     </div>
@@ -2013,24 +2050,40 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       </button>
                     )}
 
-                    {status === 'pending' && (
-                      <>
-                        <button
-                          id={`accept-friend-invite-${contactItem.id}`}
-                          type="button"
-                          onClick={() =>
-                            handleSetContactInviteStatus(
-                              contactItem.id,
-                              'accepted',
-                              `${contactItem.name} accepted your Friend Invite! 🎉`
-                            )
-                          }
-                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                          title={`Accept Friend Invite`}
-                        >
-                          <Check className="w-3 h-3 stroke-[2.5]" />
-                          <span>Accept Invite</span>
-                        </button>
+                    {status === 'pending' &&
+                      (isViewerInvitedPerson ? (
+                        <>
+                          <button
+                            id={`accept-friend-invite-${contactItem.id}`}
+                            type="button"
+                            onClick={() =>
+                              handleSetContactInviteStatus(
+                                contactItem.id,
+                                'accepted',
+                                `You accepted ${contactItem.name}'s Friend Invite! 🎉`
+                              )
+                            }
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title="Accept Friend Invite"
+                          >
+                            <Check className="w-3 h-3 stroke-[2.5]" />
+                            <span>Accept Friend Invite</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleSetContactInviteStatus(
+                                contactItem.id,
+                                'none',
+                                `Friend invite declined.`
+                              )
+                            }
+                            className="px-2 py-1.5 rounded-lg text-[10px] text-slate-400 hover:bg-slate-800 cursor-pointer"
+                          >
+                            Decline
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
                           onClick={() =>
@@ -2040,12 +2093,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                               `Friend invite canceled for ${contactItem.name}.`
                             )
                           }
-                          className="px-2 py-1.5 rounded-lg text-[10px] text-slate-400 hover:bg-slate-800 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                         >
-                          Cancel
+                          Cancel Invite
                         </button>
-                      </>
-                    )}
+                      ))}
 
                     {status === 'accepted' && (
                       <button
@@ -3487,6 +3539,102 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               <span className="text-xs text-slate-400 capitalize">{theme} Mode</span>
               <ChevronRight className="w-4 h-4 text-slate-400" />
             </div>
+          </div>
+
+          {/* Auto-Play Videos in Chat Feed (Data & Battery Saver) Toggle Row */}
+          <div
+            id="settings-auto-play-chat-videos-row"
+            className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+              isDark
+                ? 'bg-slate-900/75 border-slate-800'
+                : 'bg-white border-slate-200/80 shadow-2xs'
+            }`}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  autoPlayChatVideos
+                    ? 'bg-purple-500/15 text-purple-400'
+                    : 'bg-emerald-500/15 text-emerald-500'
+                }`}
+              >
+                {autoPlayChatVideos ? (
+                  <Video className="w-4 h-4" />
+                ) : (
+                  <BatteryCharging className="w-4 h-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-extrabold">
+                    Auto-Play Videos in Chat Feed
+                  </span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                      autoPlayChatVideos
+                        ? 'bg-purple-500/15 text-purple-400'
+                        : 'bg-emerald-500/15 text-emerald-500'
+                    }`}
+                  >
+                    {autoPlayChatVideos ? 'Auto-Play ON' : 'Data & Battery Saver'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  {autoPlayChatVideos
+                    ? 'Videos in the chat feed play automatically (muted). Turn off to save data and battery life.'
+                    : 'Auto-play is off to save mobile data and battery life. Videos only load when you tap Play.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              id="settings-auto-play-chat-videos-toggle"
+              type="button"
+              role="switch"
+              aria-checked={Boolean(autoPlayChatVideos)}
+              aria-label="Toggle auto-play for videos in the chat feed"
+              onClick={async () => {
+                const nextVal = !autoPlayChatVideos;
+                setAutoPlayChatVideos(nextVal);
+                setAutoPlayChatVideosSetting(nextVal);
+                const updatedProfile: UserProfile = {
+                  ...currentUser,
+                  autoPlayChatVideos: nextVal,
+                };
+                onUpdateCurrentUser(updatedProfile);
+                setUploadStatusMsg(
+                  nextVal
+                    ? '🎬 Video Auto-Play Enabled: Videos in the chat feed will auto-play muted.'
+                    : '🔋 Data & Battery Saver Active: Chat feed video auto-play turned off!'
+                );
+                try {
+                  await saveUserProfileToDb({
+                    id: currentUser.id,
+                    name: currentUser.name,
+                    avatar: currentUser.avatar,
+                  });
+                } catch {}
+                setTimeout(() => setUploadStatusMsg(null), 3000);
+              }}
+              style={
+                autoPlayChatVideos
+                  ? { backgroundColor: primaryColor }
+                  : undefined
+              }
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                autoPlayChatVideos
+                  ? ''
+                  : isDark
+                  ? 'bg-slate-700'
+                  : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  autoPlayChatVideos ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
           <div className="flex items-center justify-between py-1">
