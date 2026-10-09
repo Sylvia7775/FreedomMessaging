@@ -93,6 +93,8 @@ export interface GroupParticipant {
   moderationStatus?: 'active' | 'suspended' | 'banned';
   suspendedUntil?: string;
   banReason?: string;
+  isVerified?: boolean;
+  profileValidatedAt?: string;
 }
 
 export interface UserContact {
@@ -107,6 +109,7 @@ export interface UserContact {
   statusText?: string;
   avatarFileName?: string;
   avatarFileSize?: string;
+  avatarThumbnailUrl?: string;
   lastMessageStatus?: 'sent' | 'delivered' | 'read' | 'failed';
   status?: 'active' | 'blocked' | 'offline' | string;
   isBlocked?: boolean;
@@ -161,6 +164,8 @@ export interface UserContact {
   friendInviteStatus?: 'none' | 'pending' | 'accepted';
   friendInviteSentAt?: string;
   hideOnlineStatus?: boolean;
+  isVerified?: boolean;
+  profileValidatedAt?: string;
 }
 
 export interface UserProfile {
@@ -170,8 +175,10 @@ export interface UserProfile {
   avatar: string;
   avatarFileName?: string;
   avatarFileSize?: string;
+  avatarThumbnailUrl?: string;
   avatarUpdatedAt?: string;
   profileCoverUrl?: string;
+  profileCoverThumbnailUrl?: string;
   profileWallpaperUrl?: string;
   bio?: string;
   location?: string;
@@ -204,6 +211,8 @@ export interface UserProfile {
   fingerprintEnabled?: boolean;
   fingerprintCredentialId?: string;
   fingerprintRecordedAt?: string;
+  isVerified?: boolean;
+  profileValidatedAt?: string;
 }
 
 export interface MessageReaction {

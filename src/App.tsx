@@ -107,25 +107,46 @@ import {
   syncTypingIndicatorToDb,
   subscribeTypingIndicatorFromDb,
   saveContactOrChannelToDb,
+  logoutAdminEverywhereInDb,
 } from './lib/firebase';
 
 export default function App() {
-  // App initial loading splash screen state (false so app opens immediately without blank/splash delay)
-  const [isAppLoading, setIsAppLoading] = useState<boolean>(false);
+  // App initial loading splash screen state: always show loading page first when opening app
+  const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
 
-  // Auth state: user is authenticated by default so they directly see what is inside the app
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  // Force user to login before accessing the chats page (Admin logged out everywhere)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Navigation & View Mode: directly show the inside of the app (chats screen)
-  const [currentScreen, setCurrentScreen] = useState<ScreenView>('chats');
+  // Navigation & View Mode: always start on login page after loading screen until user logs in
+  const [currentScreen, setCurrentScreen] = useState<ScreenView>('login');
   const [presentationMode, setPresentationMode] = useState<PresentationMode>('single_phone');
   const [theme, setTheme] = useState<ThemeMode>('light');
   const [motherLanguage, setMotherLanguage] = useState<string>('English');
   const [brandConfig, setBrandConfig] = useState<AppBrandConfig>(DEFAULT_BRAND_CONFIG);
 
   const handleNavigateScreen = (screen: ScreenView, _footerTab?: FooterPageTab) => {
+    if (
+      !isAuthenticated &&
+      screen !== 'login' &&
+      screen !== 'password_reset' &&
+      screen !== 'onboarding'
+    ) {
+      setCurrentScreen('login');
+      setToastMessage('🔒 Login Required: Please sign in or create an account before accessing Chats.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+    if (screen === 'admin' && !isAdminVerified) {
+      setIsAdminAuthModalOpen(true);
+      return;
+    }
     setCurrentScreen(screen);
   };
+
+  // Logout Admin everywhere on startup and enforce Login Page before accessing Chats
+  useEffect(() => {
+    logoutAdminEverywhereInDb().catch(() => {});
+  }, []);
 
   // Enforce Login Page as Front Page: Force everyone to see login page when logged out or not registered
   useEffect(() => {
@@ -133,8 +154,7 @@ export default function App() {
       !isAuthenticated &&
       currentScreen !== 'login' &&
       currentScreen !== 'password_reset' &&
-      currentScreen !== 'onboarding' &&
-      currentScreen !== 'admin'
+      currentScreen !== 'onboarding'
     ) {
       setCurrentScreen('login');
     }
@@ -150,17 +170,52 @@ export default function App() {
 
     if (isSuperAdmin) {
       setIsAdminVerified(true);
-      localStorage.setItem('freedom_admin_verified', 'true');
+      localStorage.setItem('freedom_admin_verified_v4', 'true');
+    } else {
+      setIsAdminVerified(false);
+      localStorage.removeItem('freedom_admin_verified_v4');
     }
 
     if (user) {
-      setCurrentUser((prev) => ({ ...prev, ...user }));
-      if (user.motherLanguage) {
-        setMotherLanguage(user.motherLanguage);
+      const cleanName = user.name || 'WeedChat User';
+      const cleanUsername = (
+        user.username ||
+        cleanName.toLowerCase().replace(/\s+/g, '_')
+      ).replace(/^@+/, '');
+      const resolvedId = user.id || `usr_${cleanUsername}`;
+      const resolvedAvatar =
+        user.avatar || getInitialsAvatar(cleanName, '#7C3AED');
+      const fullSessionUser: UserProfile = {
+        id: resolvedId,
+        name: cleanName,
+        username: cleanUsername,
+        email: user.email || `${cleanUsername}@weedchat.app`,
+        phoneNumber: user.phoneNumber,
+        avatar: resolvedAvatar,
+        bio:
+          user.bio ||
+          `Freedom talk in ${user.motherLanguage || motherLanguage || 'English'} 🕊️`,
+        location: user.location || 'New York,NY',
+        motherLanguage: user.motherLanguage || motherLanguage || 'English',
+        isOnline: true,
+        hideOnlineStatus: false,
+        avatarShape: 'round',
+      };
+      setCurrentUser(fullSessionUser);
+      if (fullSessionUser.motherLanguage) {
+        setMotherLanguage(fullSessionUser.motherLanguage);
       }
-      if (user.id) {
-        localStorage.setItem('freedom_current_user_id', user.id);
-      }
+      try {
+        localStorage.setItem('freedom_current_user_id', resolvedId);
+        localStorage.setItem(
+          'freedom_current_user_profile',
+          JSON.stringify(fullSessionUser)
+        );
+        localStorage.setItem(
+          'freedom_active_user_session_v4',
+          JSON.stringify(fullSessionUser)
+        );
+      } catch {}
     }
     // Direct user to their Profile page after login and accepting Terms of Use & Privacy Policy
     setCurrentScreen('profile');
@@ -170,10 +225,13 @@ export default function App() {
 
   const handleRegisterSuccess = async (newUser: UserProfile) => {
     setIsAuthenticated(true);
+    setIsAdminVerified(false);
+    localStorage.removeItem('freedom_admin_verified_v4');
     localStorage.setItem('freedom_user_authenticated', 'true');
     localStorage.setItem('freedom_current_user_id', newUser.id);
     try {
       localStorage.setItem('freedom_current_user_profile', JSON.stringify(newUser));
+      localStorage.setItem('freedom_active_user_session_v4', JSON.stringify(newUser));
     } catch {}
     setCurrentUser(newUser);
     const chosenLang = newUser.motherLanguage || 'English';
@@ -197,9 +255,9 @@ export default function App() {
     const autoWelcomeMsg: ChatMessage = {
       id: `msg-auto-welcome-${Date.now()}`,
       senderId: 'other',
-      senderParticipantId: 'admin_mobilephonesky',
-      senderName: 'WeedChat Support & Admin',
-      senderAvatar: getInitialsAvatar('WeedChat Admin', '#7C3AED'),
+      senderParticipantId: 'usr_elena_rodriguez',
+      senderName: 'Elena Rodriguez',
+      senderAvatar: getInitialsAvatar('Elena Rodriguez', '#10B981'),
       senderLanguage: 'English',
       text: welcomeText,
       type: 'text',
@@ -217,33 +275,35 @@ export default function App() {
     };
 
     // Deliver automatic Welcome Message into the user's chats & messages history
-    const adminContactId = 'admin_mobilephonesky';
-    const updatedAdminMsgs = [...INITIAL_KRISTIN_MESSAGES, autoWelcomeMsg];
-    setMessages(updatedAdminMsgs);
+    const firstContactId = INITIAL_CONTACTS[0]?.id || 'usr_elena_rodriguez';
+    const updatedWelcomeMsgs = [...INITIAL_KRISTIN_MESSAGES, autoWelcomeMsg];
+    setMessages(updatedWelcomeMsgs);
     setMessagesByChat((prev) => {
       const next = {
         ...prev,
-        [adminContactId]: updatedAdminMsgs,
+        [firstContactId]: updatedWelcomeMsgs,
         [newUser.id]: [autoWelcomeMsg],
       };
       try {
-        localStorage.setItem('freedom_saved_messages_by_chat_v2', JSON.stringify(next));
+        localStorage.setItem('freedom_saved_messages_by_chat_v3', JSON.stringify(next));
       } catch {}
       return next;
     });
 
-    // Update contacts list with new user & updated Welcome message preview on Official WeedChat Support chat
+    // Update contacts list with new user & updated Welcome message preview
     setContacts((prev) => {
-      const updatedList = prev.map((c) =>
-        c.id === adminContactId
-          ? {
-              ...c,
-              lastMessage: welcomeText,
-              time: 'Just now',
-              unreadCount: (c.unreadCount || 0) + 1,
-            }
-          : c
-      );
+      const updatedList = prev
+        .filter((c) => c.id !== 'admin_mobilephonesky')
+        .map((c) =>
+          c.id === firstContactId
+            ? {
+                ...c,
+                lastMessage: welcomeText,
+                time: 'Just now',
+                unreadCount: (c.unreadCount || 0) + 1,
+              }
+            : c
+        );
       if (updatedList.some((c) => c.id === newUser.id)) return updatedList;
       const contactEntry: UserContact = {
         id: newUser.id,
@@ -266,7 +326,7 @@ export default function App() {
     });
 
     setSelectedContact((prev) =>
-      prev.id === adminContactId
+      prev.id === firstContactId
         ? { ...prev, lastMessage: welcomeText, time: 'Just now', unreadCount: 1 }
         : prev
     );
@@ -277,7 +337,7 @@ export default function App() {
       userName: newUser.name,
       username: cleanHandle,
       message: welcomeText,
-      avatar: getInitialsAvatar('WeedChat Admin', '#7C3AED'),
+      avatar: getInitialsAvatar('WeedChat', '#7C3AED'),
     });
     setTimeout(() => {
       setWelcomeMessageToast((curr) => (curr?.userName === newUser.name ? null : curr));
@@ -297,10 +357,15 @@ export default function App() {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
-    localStorage.setItem('freedom_user_authenticated', 'false');
-    localStorage.removeItem('freedom_current_user_id');
+    setIsAdminVerified(false);
+    try {
+      localStorage.setItem('freedom_user_authenticated', 'false');
+      localStorage.removeItem('freedom_current_user_id');
+      localStorage.removeItem('freedom_active_user_session_v4');
+      localStorage.removeItem('freedom_admin_verified_v4');
+    } catch {}
     setCurrentScreen('login');
-    setToastMessage('You have been logged out. Please sign in to continue.');
+    setToastMessage('You have been logged out. Please sign in or create an account.');
     setTimeout(() => setToastMessage(null), 3500);
   };
 
@@ -314,78 +379,54 @@ export default function App() {
       .replace(/Welcome to Freedom!/gi, 'Welcome to WeedChat!');
   };
 
-  // Database-backed Current User Profile: App Owner / Admin profile with automatic local & DB persistence
+  // Database-backed Current User Profile: User's own profile per device (never defaults to Admin)
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     try {
-      const savedProfileRaw = localStorage.getItem('freedom_current_user_profile');
-      const savedAvatarRec = getSavedAvatarRecord('admin_mobilephonesky');
-      const savedHideOnline =
-        localStorage.getItem('freedom_privacy_hide_online_current_user') === 'true';
-      if (savedProfileRaw) {
-        const parsed = JSON.parse(savedProfileRaw) as UserProfile;
-        if (!isExampleUserRecord(parsed.id || '', parsed)) {
-          const normalizedName = normalizeWeedChatText(
-            parsed.name,
-            'WeedChat Support & Admin'
-          );
+      const savedSessionRaw = localStorage.getItem('freedom_active_user_session_v4');
+      if (savedSessionRaw) {
+        const parsed = JSON.parse(savedSessionRaw) as UserProfile;
+        if (parsed && parsed.id && !isExampleUserRecord(parsed.id, parsed)) {
+          const savedAvatarRec = getSavedAvatarRecord(parsed.id);
+          const cleanName = parsed.name || 'WeedChat User';
           const cleanAv = getCleanAvatar(
-            normalizedName,
+            cleanName,
             savedAvatarRec?.avatar || parsed.avatar,
             '#7C3AED',
-            parsed.id || 'admin_mobilephonesky'
+            parsed.id
           );
-          const hideOnline =
-            typeof parsed.hideOnlineStatus === 'boolean'
-              ? parsed.hideOnlineStatus
-              : savedHideOnline;
           return {
             ...parsed,
-            id: parsed.id || 'admin_mobilephonesky',
-            name: normalizedName,
-            bio: normalizeWeedChatText(
-              parsed.bio,
-              'WeedChat Official Administration & User Support Desk'
+            name: cleanName,
+            username: (parsed.username || cleanName.toLowerCase().replace(/\s+/g, '_')).replace(
+              /^@+/,
+              ''
             ),
-            email: parsed.email || ADMIN_CREDENTIALS.email,
             avatar: cleanAv,
             avatarFileName: savedAvatarRec?.avatarFileName || parsed.avatarFileName,
             avatarFileSize: savedAvatarRec?.avatarFileSize || parsed.avatarFileSize,
-            hideOnlineStatus: hideOnline,
-            isOnline: !hideOnline,
             location: parsed.location || 'New York,NY',
           };
         }
       }
     } catch {}
-    const savedAvatarRec = getSavedAvatarRecord('admin_mobilephonesky');
-    const savedHideOnline =
-      typeof window !== 'undefined' &&
-      localStorage.getItem('freedom_privacy_hide_online_current_user') === 'true';
     return {
-      id: 'admin_mobilephonesky',
-      name: 'WeedChat Support & Admin',
-      username: 'mobilephonesky987',
-      email: ADMIN_CREDENTIALS.email,
-      avatar: getCleanAvatar(
-        'WeedChat Support & Admin',
-        savedAvatarRec?.avatar,
-        '#7C3AED',
-        'admin_mobilephonesky'
-      ),
-      avatarFileName: savedAvatarRec?.avatarFileName,
-      avatarFileSize: savedAvatarRec?.avatarFileSize,
-      bio: 'WeedChat Official Administration & User Support Desk',
+      id: 'usr_guest',
+      name: 'WeedChat User',
+      username: 'weedchat_user',
+      email: 'user@weedchat.app',
+      avatar: getInitialsAvatar('WeedChat User', '#7C3AED'),
+      bio: 'Freedom talk any person of your mother language 🕊️',
       location: 'New York,NY',
       motherLanguage: 'English',
-      isOnline: !savedHideOnline,
-      hideOnlineStatus: savedHideOnline,
+      isOnline: true,
+      hideOnlineStatus: false,
       avatarShape: 'round',
     };
   });
 
   // Automatically persist currentUser profile & avatar whenever updated
   const handleUpdateCurrentUserProfile = (updated: UserProfile) => {
-    const cleanAv = getCleanAvatar(updated.name || 'Abdullah', updated.avatar, '#7C3AED', updated.id);
+    const cleanAv = getCleanAvatar(updated.name || 'WeedChat User', updated.avatar, '#7C3AED', updated.id);
     const normalized: UserProfile = {
       ...updated,
       avatar: cleanAv,
@@ -393,8 +434,9 @@ export default function App() {
     setCurrentUser(normalized);
     try {
       localStorage.setItem('freedom_current_user_profile', JSON.stringify(normalized));
+      localStorage.setItem('freedom_active_user_session_v4', JSON.stringify(normalized));
       saveUserAvatarLocally(
-        normalized.id || 'user_abdullah',
+        normalized.id || 'usr_guest',
         cleanAv,
         normalized.avatarFileName,
         normalized.avatarFileSize
@@ -466,13 +508,13 @@ export default function App() {
   });
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>(() => {
     try {
-      const saved = localStorage.getItem('freedom_saved_messages_by_chat_v2');
+      const saved = localStorage.getItem('freedom_saved_messages_by_chat_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
           return {
             group_global_team: parsed.group_global_team || INITIAL_GROUP_MESSAGES,
-            user_kristin: parsed.user_kristin || INITIAL_KRISTIN_MESSAGES,
+            usr_elena_rodriguez: parsed.usr_elena_rodriguez || INITIAL_KRISTIN_MESSAGES,
             ...parsed,
           };
         }
@@ -480,13 +522,13 @@ export default function App() {
     } catch {}
     return {
       group_global_team: INITIAL_GROUP_MESSAGES,
-      user_kristin: INITIAL_KRISTIN_MESSAGES,
+      usr_elena_rodriguez: INITIAL_KRISTIN_MESSAGES,
     };
   });
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const firstId = INITIAL_CONTACTS[0]?.id || 'group_global_team';
+    const firstId = INITIAL_CONTACTS[0]?.id || 'usr_elena_rodriguez';
     try {
-      const saved = localStorage.getItem('freedom_saved_messages_by_chat_v2');
+      const saved = localStorage.getItem('freedom_saved_messages_by_chat_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed?.[firstId]) return parsed[firstId];
@@ -506,7 +548,7 @@ export default function App() {
           [selectedContact.id]: messages,
         };
         try {
-          localStorage.setItem('freedom_saved_messages_by_chat_v2', JSON.stringify(next));
+          localStorage.setItem('freedom_saved_messages_by_chat_v3', JSON.stringify(next));
         } catch (err) {
           console.warn('Could not persist messages to localStorage:', err);
         }
@@ -941,10 +983,10 @@ export default function App() {
   // Global Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // App Admin & Brand Customization State
+  // App Admin & Brand Customization State (Admin logged out everywhere by default)
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>(INITIAL_BANNED_USERS);
   const [reportedUsers, setReportedUsers] = useState<ReportedUser[]>(INITIAL_REPORTED_USERS);
-  const [isAdminVerified, setIsAdminVerified] = useState<boolean>(true);
+  const [isAdminVerified, setIsAdminVerified] = useState<boolean>(false);
   const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
   const adminEmail = ADMIN_CREDENTIALS.email;
 
@@ -1028,38 +1070,34 @@ export default function App() {
       }
     );
 
-    // 3. Subscribe to current user profile in Firestore (App Owner / Admin)
-    const unsubCurrent = subscribeUserProfile('admin_mobilephonesky', (profile) => {
-      if (profile) {
-        setCurrentUser((prev) => {
-          // Do not overwrite if a newly registered user is logged in
-          if (prev.id && prev.id !== 'admin_mobilephonesky') {
-            return prev;
-          }
-          const savedAv = getSavedAvatarRecord('admin_mobilephonesky');
-          const cleanName = normalizeWeedChatText(
-            profile.name || prev.name,
-            'WeedChat Support & Admin'
-          );
-          const resolvedAv = getCleanAvatar(
-            cleanName,
-            savedAv?.avatar || profile.avatar || prev.avatar,
-            '#7C3AED',
-            'admin_mobilephonesky'
-          );
-          return {
-            ...prev,
-            ...profile,
-            name: cleanName,
-            bio: normalizeWeedChatText(
-              profile.bio || prev.bio,
-              'WeedChat Official Administration & User Support Desk'
-            ),
-            avatar: resolvedAv,
-          };
-        });
-      }
-    });
+    // 3. Subscribe to the currently signed-in user's own profile in Firestore (never overwrite with Admin unless logged in as Admin)
+    const activeUserId = currentUser.id;
+    const unsubCurrent =
+      activeUserId && activeUserId !== 'usr_guest'
+        ? subscribeUserProfile(activeUserId, (profile) => {
+            if (profile) {
+              setCurrentUser((prev) => {
+                if (prev.id !== activeUserId) {
+                  return prev;
+                }
+                const savedAv = getSavedAvatarRecord(activeUserId);
+                const cleanName = profile.name || prev.name || 'WeedChat User';
+                const resolvedAv = getCleanAvatar(
+                  cleanName,
+                  savedAv?.avatar || profile.avatar || prev.avatar,
+                  '#7C3AED',
+                  activeUserId
+                );
+                return {
+                  ...prev,
+                  ...profile,
+                  name: cleanName,
+                  avatar: resolvedAv,
+                };
+              });
+            }
+          })
+        : () => {};
 
     // 4. Subscribe to App Brand Config
     const unsubBrand = subscribeAppBrandConfig((config) => {
@@ -1714,13 +1752,26 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Start Call handler
+  // Start Call handler (logs call to Calls tab like WhatsApp)
   const handleStartCall = (
     contactName: string = selectedContact.name,
     avatar: string = selectedContact.avatar,
     type: 'voice' | 'video' = 'voice'
   ) => {
     setActiveCall({ contactName, avatar, type });
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const matchedContact = contacts.find((c) => c.name === contactName) || selectedContact;
+    const newCallEntry: CallLog = {
+      id: `call-${Date.now()}`,
+      contactId: matchedContact?.id || `usr_${contactName.toLowerCase().replace(/\s+/g, '_')}`,
+      contactName,
+      avatar,
+      type,
+      direction: 'outgoing',
+      time: `Today, ${nowTime}`,
+      duration: 'Connected',
+    };
+    setCalls((prev) => [newCallEntry, ...prev]);
   };
 
   // Add new contact, group, or channel handler - persists to Firestore users database
@@ -2128,15 +2179,19 @@ export default function App() {
 
   const handleLockAdmin = () => {
     setIsAdminVerified(false);
-    localStorage.setItem('freedom_admin_verified', 'false');
+    try {
+      localStorage.setItem('freedom_admin_verified_v4', 'false');
+    } catch {}
     if (currentScreen === 'admin') {
-      setCurrentScreen('chats');
+      setCurrentScreen('profile');
     }
   };
 
   const handleVerifyAdmin = () => {
     setIsAdminVerified(true);
-    localStorage.setItem('freedom_admin_verified', 'true');
+    try {
+      localStorage.setItem('freedom_admin_verified_v4', 'true');
+    } catch {}
     setCurrentScreen('admin');
   };
 
@@ -2157,6 +2212,25 @@ export default function App() {
           appName={brandConfig.appName}
           onFinishLoading={() => setIsAppLoading(false)}
           durationMs={2200}
+        />
+      );
+    }
+
+    // Strict Login Gate: Force user to login or register before accessing Chats or any internal screen
+    if (
+      !isAuthenticated &&
+      currentScreen !== 'login' &&
+      currentScreen !== 'password_reset' &&
+      currentScreen !== 'onboarding'
+    ) {
+      return (
+        <LoginPage
+          onLoginSuccess={handleLoginSuccess}
+          onRegisterSuccess={handleRegisterSuccess}
+          onOpenPasswordReset={() => setCurrentScreen('password_reset')}
+          theme={theme}
+          primaryColor={brandConfig.primaryColor}
+          brandConfig={brandConfig}
         />
       );
     }

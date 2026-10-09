@@ -407,54 +407,251 @@ export async function optimizeUploadedImageFile(
 }
 
 /**
- * Generate a real frame thumbnail from an uploaded video file
+ * Automatically generate a crisp, center-cropped thumbnail + full optimized media
+ * whenever a user uploads a Profile Picture (avatar), Profile Cover, or Profile Video.
+ */
+export async function generateProfileThumbnailFile(
+  file: File,
+  thumbWidth = 180,
+  thumbHeight = 180,
+  fullMaxDimension = 720
+): Promise<{
+  dataUrl: string;
+  thumbnailDataUrl: string;
+  fileName: string;
+  fileSize: string;
+  thumbnailDimensions: string;
+}> {
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Support video files uploaded as profile media by extracting a frame first
+  if (file.type.startsWith('video/')) {
+    const videoRes = await generateVideoFileThumbnail(file);
+    return {
+      dataUrl: videoRes.thumbnailUrl,
+      thumbnailDataUrl: videoRes.thumbnailUrl,
+      fileName: file.name,
+      fileSize: formatSize(file.size),
+      thumbnailDimensions: `${thumbWidth}×${thumbHeight}`,
+    };
+  }
+
+  const optimizedFull = await optimizeMediaImageFile(file, fullMaxDimension, 0.86);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onerror = () => {
+      resolve({
+        dataUrl: optimizedFull.dataUrl,
+        thumbnailDataUrl: optimizedFull.dataUrl,
+        fileName: optimizedFull.fileName,
+        fileSize: optimizedFull.fileSize,
+        thumbnailDimensions: `${thumbWidth}×${thumbHeight}`,
+      });
+    };
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = thumbWidth;
+        canvas.height = thumbHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve({
+            dataUrl: optimizedFull.dataUrl,
+            thumbnailDataUrl: optimizedFull.dataUrl,
+            fileName: optimizedFull.fileName,
+            fileSize: optimizedFull.fileSize,
+            thumbnailDimensions: `${thumbWidth}×${thumbHeight}`,
+          });
+          return;
+        }
+
+        // Center-crop image to exact aspect ratio (e.g. 1:1 square for avatar or 16:9 for cover)
+        const srcW = img.width || thumbWidth;
+        const srcH = img.height || thumbHeight;
+        const targetRatio = thumbWidth / thumbHeight;
+        const srcRatio = srcW / srcH;
+
+        let sx = 0;
+        let sy = 0;
+        let sWidth = srcW;
+        let sHeight = srcH;
+
+        if (srcRatio > targetRatio) {
+          sWidth = Math.round(srcH * targetRatio);
+          sx = Math.round((srcW - sWidth) / 2);
+        } else {
+          sHeight = Math.round(srcW / targetRatio);
+          sy = Math.round((srcH - sHeight) / 2);
+        }
+
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, thumbWidth, thumbHeight);
+        const thumbnailDataUrl = canvas.toDataURL('image/jpeg', 0.84);
+
+        resolve({
+          dataUrl: optimizedFull.dataUrl,
+          thumbnailDataUrl,
+          fileName: optimizedFull.fileName,
+          fileSize: optimizedFull.fileSize,
+          thumbnailDimensions: `${thumbWidth}×${thumbHeight}`,
+        });
+      } catch {
+        resolve({
+          dataUrl: optimizedFull.dataUrl,
+          thumbnailDataUrl: optimizedFull.dataUrl,
+          fileName: optimizedFull.fileName,
+          fileSize: optimizedFull.fileSize,
+          thumbnailDimensions: `${thumbWidth}×${thumbHeight}`,
+        });
+      }
+    };
+    img.src = optimizedFull.dataUrl;
+  });
+}
+
+/**
+ * Capture the current frame of an HTMLVideoElement in the Video Editor as a JPEG thumbnail data URL
+ */
+export function captureVideoElementThumbnail(
+  videoEl: HTMLVideoElement | null,
+  options?: {
+    filterCss?: string;
+    captionText?: string;
+    captionColor?: string;
+    fallbackTitle?: string;
+  }
+): string {
+  const title = options?.fallbackTitle || 'Captured Video Thumbnail';
+  const fallback = createPlatformSvgThumbnail('Video', title, 'Current Frame', '#7C3AED', '#EC4899');
+  if (!videoEl) return fallback;
+
+  try {
+    const width = videoEl.videoWidth ? Math.min(640, videoEl.videoWidth) : 640;
+    const height = videoEl.videoHeight
+      ? Math.round((width * videoEl.videoHeight) / videoEl.videoWidth)
+      : 360;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return fallback;
+
+    if (options?.filterCss && options.filterCss !== 'none') {
+      ctx.filter = options.filterCss;
+    }
+    ctx.drawImage(videoEl, 0, 0, width, height);
+    ctx.filter = 'none';
+
+    if (options?.captionText && options.captionText.trim()) {
+      const fontSize = Math.max(18, Math.round(width * 0.042));
+      ctx.font = `800 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      const textMetrics = ctx.measureText(options.captionText);
+      const padX = 16;
+      const boxW = Math.min(width - 24, textMetrics.width + padX * 2);
+      const boxH = fontSize + 16;
+      ctx.fillRect((width - boxW) / 2, height - boxH - 18, boxW, boxH);
+      ctx.fillStyle = options.captionColor || '#ffffff';
+      ctx.fillText(options.captionText, width / 2, height - boxH / 2 - 18);
+    }
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.86);
+    if (dataUrl && dataUrl.startsWith('data:image/')) {
+      return dataUrl;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Generate a real frame thumbnail (plus optional timeline frames) from an uploaded video file
  */
 export async function generateVideoFileThumbnail(
   file: File
-): Promise<{ videoUrl: string; videoObjectUrl: string; thumbnailUrl: string; title: string; duration: string }> {
-  const videoUrl = URL.createObjectURL(file);
+): Promise<{
+  videoUrl: string;
+  videoObjectUrl: string;
+  thumbnailUrl: string;
+  timelineFrames: string[];
+  title: string;
+  duration: string;
+}> {
+  const videoObjectUrl = URL.createObjectURL(file);
   const cleanTitle = file.name.replace(/\.[^/.]+$/, '') || 'Uploaded Video';
+
+  // Read as dataURL if file <= 8MB so it persists across reloads, otherwise use objectURL
+  const readDataUrlPromise: Promise<string> =
+    file.size <= 8 * 1024 * 1024
+      ? new Promise((res) => {
+          const reader = new FileReader();
+          reader.onload = () => res((reader.result as string) || videoObjectUrl);
+          reader.onerror = () => res(videoObjectUrl);
+          reader.readAsDataURL(file);
+        })
+      : Promise.resolve(videoObjectUrl);
+
+  const videoUrl = await readDataUrlPromise;
 
   return new Promise((resolve) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
-    video.src = videoUrl;
+    video.crossOrigin = 'anonymous';
+    video.src = videoObjectUrl;
 
-    const fallbackThumb = createPlatformSvgThumbnail('Video', cleanTitle, 'Local HD', '#7C3AED', '#059669');
+    const fallbackThumb = createPlatformSvgThumbnail(
+      'Video',
+      cleanTitle,
+      'Auto Thumbnail',
+      '#7C3AED',
+      '#059669'
+    );
 
     const timeout = setTimeout(() => {
       resolve({
         videoUrl,
-        videoObjectUrl: videoUrl,
+        videoObjectUrl,
         thumbnailUrl: fallbackThumb,
+        timelineFrames: [fallbackThumb],
         title: cleanTitle,
         duration: '0:45',
       });
-    }, 2500);
+    }, 3000);
 
     video.onloadedmetadata = () => {
-      video.currentTime = Math.min(1, (video.duration || 2) * 0.25);
+      const targetTime = Math.min(1.2, Math.max(0.1, (video.duration || 2) * 0.25));
+      video.currentTime = targetTime;
     };
 
     video.onseeked = () => {
       clearTimeout(timeout);
       try {
+        const vw = video.videoWidth || 640;
+        const vh = video.videoHeight || 360;
         const canvas = document.createElement('canvas');
-        canvas.width = 480;
-        canvas.height = 270;
+        canvas.width = 640;
+        canvas.height = Math.max(240, Math.round((640 * vh) / vw));
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.82);
-          const durSecs = Math.round(video.duration || 45);
+          const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const durSecs = Math.max(1, Math.round(video.duration || 45));
           const mins = Math.floor(durSecs / 60);
           const secs = durSecs % 60;
           resolve({
             videoUrl,
-            videoObjectUrl: videoUrl,
+            videoObjectUrl,
             thumbnailUrl: thumbDataUrl,
+            timelineFrames: [thumbDataUrl],
             title: cleanTitle,
             duration: `${mins}:${secs < 10 ? '0' : ''}${secs}`,
           });
@@ -463,8 +660,9 @@ export async function generateVideoFileThumbnail(
       } catch {}
       resolve({
         videoUrl,
-        videoObjectUrl: videoUrl,
+        videoObjectUrl,
         thumbnailUrl: fallbackThumb,
+        timelineFrames: [fallbackThumb],
         title: cleanTitle,
         duration: '0:45',
       });
@@ -474,8 +672,9 @@ export async function generateVideoFileThumbnail(
       clearTimeout(timeout);
       resolve({
         videoUrl,
-        videoObjectUrl: videoUrl,
+        videoObjectUrl,
         thumbnailUrl: fallbackThumb,
+        timelineFrames: [fallbackThumb],
         title: cleanTitle,
         duration: '0:45',
       });

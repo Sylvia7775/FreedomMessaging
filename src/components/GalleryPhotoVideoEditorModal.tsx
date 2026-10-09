@@ -29,7 +29,15 @@ import {
   Crop,
   Share2,
   Send,
+  Upload,
+  Camera,
+  Film,
 } from 'lucide-react';
+import {
+  generateVideoFileThumbnail,
+  generateProfileThumbnailFile,
+  captureVideoElementThumbnail,
+} from '../lib/videoPlatformHelper';
 import {
   FILTER_CATEGORIES,
   SIXTY_PLUS_FILTERS,
@@ -52,6 +60,7 @@ export type EditorToolTab =
   | 'text'
   | 'text_design'
   | 'brush'
+  | 'video_thumbnail'
   | 'ai_tools';
 
 export interface EditorAdjustments {
@@ -247,6 +256,15 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
   const [videoCurrentTime, setVideoCurrentTime] = useState<number>(0);
   const [videoDuration, setVideoDuration] = useState<number>(44);
 
+  // Current Video Thumbnail State (Auto-generated on upload/load + Custom Upload in Video Editor)
+  const [currentVideoThumbnailUrl, setCurrentVideoThumbnailUrl] = useState<string>(
+    thumbnailUrl || ''
+  );
+  const [videoThumbnailSource, setVideoThumbnailSource] = useState<
+    'auto' | 'uploaded' | 'captured_frame'
+  >('auto');
+  const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState<boolean>(false);
+
   // Text & Text Design Input State
   const [textInputDraft, setTextInputDraft] = useState<string>('My cat');
   const [selectedTextColor, setSelectedTextColor] = useState<string>('#60A5FA');
@@ -281,6 +299,7 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
   const loadedStickerImagesRef = useRef<Record<string, HTMLImageElement>>({});
   const customStickerFileRef = useRef<HTMLInputElement | null>(null);
   const replaceMediaFileRef = useRef<HTMLInputElement | null>(null);
+  const videoThumbnailFileRef = useRef<HTMLInputElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -315,6 +334,8 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
     setActiveMediaType(initialMediaType);
     setActiveMediaUrl(initialMediaUrl);
     setActiveTitle(mediaTitle || 'Creative Media');
+    setCurrentVideoThumbnailUrl(thumbnailUrl || initialMediaUrl || '');
+    setVideoThumbnailSource('auto');
     setAdjustments(DEFAULT_ADJUSTMENTS);
     setFocusConfig(DEFAULT_FOCUS);
     setCropConfig(DEFAULT_CROP);
@@ -370,6 +391,20 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
         if (isPlaying) {
           vid.play().catch(() => {});
         }
+      };
+      vid.onloadeddata = () => {
+        // Automatically generate a thumbnail from the loaded video if not custom uploaded
+        setVideoThumbnailSource((prevSource) => {
+          if (prevSource === 'auto') {
+            const autoThumb = captureVideoElementThumbnail(vid, {
+              fallbackTitle: activeTitle || 'Video Clip',
+            });
+            if (autoThumb) {
+              setCurrentVideoThumbnailUrl(autoThumb);
+            }
+          }
+          return prevSource;
+        });
       };
       vid.ontimeupdate = () => {
         setVideoCurrentTime(vid.currentTime || 0);
@@ -1356,12 +1391,19 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
         document.body.removeChild(a);
       }
 
+      const resolvedThumb =
+        activeMediaType === 'video'
+          ? videoThumbnailSource === 'uploaded' && currentVideoThumbnailUrl
+            ? currentVideoThumbnailUrl
+            : dataUrl || currentVideoThumbnailUrl || thumbnailUrl || activeMediaUrl
+          : dataUrl || thumbnailUrl || activeMediaUrl;
+
       if (onSaveEditedMedia) {
         onSaveEditedMedia({
           mediaId,
           mediaType: activeMediaType,
           editedDataUrl: activeMediaType === 'image' ? dataUrl : activeMediaUrl,
-          thumbnailUrl: dataUrl || thumbnailUrl || activeMediaUrl,
+          thumbnailUrl: resolvedThumb,
           title: activeTitle,
         });
       }
@@ -1564,14 +1606,71 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
         ref={replaceMediaFileRef}
         type="file"
         accept="image/*,video/*"
-        onChange={(e) => {
+        onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
           const isVid = file.type.startsWith('video');
-          const url = URL.createObjectURL(file);
-          setActiveMediaType(isVid ? 'video' : 'image');
-          setActiveMediaUrl(url);
-          setActiveTitle(file.name.replace(/\.[^.]+$/, '') || 'Edited Creative');
+          setIsGeneratingThumbnail(true);
+          try {
+            if (isVid) {
+              const vidRes = await generateVideoFileThumbnail(file);
+              setActiveMediaType('video');
+              setActiveMediaUrl(vidRes.videoUrl);
+              setActiveTitle(vidRes.title || 'Edited Video');
+              setCurrentVideoThumbnailUrl(vidRes.thumbnailUrl);
+              setVideoThumbnailSource('auto');
+              showToast('🎬 Video loaded & thumbnail automatically generated!');
+            } else {
+              const imgRes = await generateProfileThumbnailFile(file, 320, 320, 960);
+              setActiveMediaType('image');
+              setActiveMediaUrl(imgRes.dataUrl);
+              setActiveTitle(file.name.replace(/\.[^.]+$/, '') || 'Edited Creative');
+              setCurrentVideoThumbnailUrl(imgRes.thumbnailDataUrl);
+              setVideoThumbnailSource('auto');
+              showToast('📸 Image loaded & thumbnail automatically generated!');
+            }
+          } finally {
+            setIsGeneratingThumbnail(false);
+          }
+          e.target.value = '';
+        }}
+        className="hidden"
+      />
+      {/* Hidden file input for uploading a custom video thumbnail in Video Editor */}
+      <input
+        ref={videoThumbnailFileRef}
+        id="video-editor-thumbnail-file-input"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setIsGeneratingThumbnail(true);
+          try {
+            const thumbRes = await generateProfileThumbnailFile(file, 640, 360, 960);
+            setCurrentVideoThumbnailUrl(thumbRes.dataUrl);
+            setVideoThumbnailSource('uploaded');
+            // Also load into imageRef fallback so if video is paused or exported, the uploaded thumbnail is ready
+            const uploadedImg = new Image();
+            uploadedImg.onload = () => {
+              imageRef.current = uploadedImg;
+            };
+            uploadedImg.src = thumbRes.dataUrl;
+            if (onSaveEditedMedia) {
+              onSaveEditedMedia({
+                mediaId,
+                mediaType: activeMediaType,
+                editedDataUrl: activeMediaType === 'video' ? activeMediaUrl : thumbRes.dataUrl,
+                thumbnailUrl: thumbRes.dataUrl,
+                title: activeTitle,
+              });
+            }
+            showToast('🖼️ Uploaded & applied current video thumbnail!');
+          } catch {
+            showToast('Failed to upload video thumbnail image');
+          } finally {
+            setIsGeneratingThumbnail(false);
+          }
           e.target.value = '';
         }}
         className="hidden"
@@ -1581,7 +1680,7 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
       <div className="relative w-full h-full sm:max-w-[430px] sm:max-h-[860px] sm:rounded-[30px] overflow-hidden bg-[#121212] text-white shadow-2xl border border-white/10 flex flex-col justify-between">
         {/* Top Quick Studio Bar (inspired by 36.jpg: TT, Marker, Filter Sparkle, Sticker Smiley, Upload Media + Photo/Video Switcher) */}
         <div className="px-3.5 py-2.5 bg-[#161616] border-b border-white/10 flex items-center justify-between gap-2 z-20">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="px-2.5 py-1 rounded-md bg-white/10 text-[11px] font-bold tracking-wide text-white flex items-center gap-1.5">
               <span>{activeMediaType === 'video' ? '🎬 Video Editor' : '📸 Photo Editor'}</span>
             </span>
@@ -1589,10 +1688,23 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
               type="button"
               onClick={() => replaceMediaFileRef.current?.click()}
               className="px-2 py-1 rounded-md bg-white/5 hover:bg-white/15 text-[10px] font-semibold text-white/80 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-              title="Open another Photo or Video from device"
+              title="Open another Photo or Video from device (auto-generates thumbnail)"
             >
               <ImageIcon className="w-3 h-3" />
               <span>Open Media</span>
+            </button>
+            <button
+              id="video-editor-upload-thumbnail-top-btn"
+              type="button"
+              onClick={() => {
+                setActiveTool('video_thumbnail');
+                videoThumbnailFileRef.current?.click();
+              }}
+              className="px-2 py-1 rounded-md bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/40 text-[10px] font-bold text-purple-200 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+              title="Upload custom image or capture current frame as Video Thumbnail"
+            >
+              <Upload className="w-3 h-3" />
+              <span>Upload Thumbnail</span>
             </button>
           </div>
 
@@ -2012,8 +2124,45 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
             )}
           </button>
 
-          {/* Right: Undo & Redo Buttons */}
-          <div className="flex items-center gap-2">
+          {/* Right: Video Thumbnail Quick Upload + Undo & Redo Buttons */}
+          <div className="flex items-center gap-1.5">
+            <button
+              id="editor-capture-current-video-thumbnail-btn"
+              type="button"
+              onClick={() => {
+                let capturedUrl = '';
+                if (canvasRef.current) {
+                  try {
+                    capturedUrl = canvasRef.current.toDataURL('image/jpeg', 0.9);
+                  } catch {}
+                }
+                if (!capturedUrl && videoRef.current) {
+                  capturedUrl = captureVideoElementThumbnail(videoRef.current, {
+                    filterCss: buildCombinedFilterString(),
+                    fallbackTitle: activeTitle,
+                  });
+                }
+                if (capturedUrl) {
+                  setCurrentVideoThumbnailUrl(capturedUrl);
+                  setVideoThumbnailSource('captured_frame');
+                  if (onSaveEditedMedia) {
+                    onSaveEditedMedia({
+                      mediaId,
+                      mediaType: activeMediaType,
+                      editedDataUrl: activeMediaType === 'video' ? activeMediaUrl : capturedUrl,
+                      thumbnailUrl: capturedUrl,
+                      title: activeTitle,
+                    });
+                  }
+                  showToast('📸 Current video frame captured & uploaded as thumbnail!');
+                }
+              }}
+              className="px-2 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+              title="Use & upload current video frame as video thumbnail"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Use Current Frame</span>
+            </button>
             <button
               id="editor-undo-btn"
               type="button"
@@ -2505,6 +2654,103 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
             </div>
           )}
 
+          {/* 7B. VIDEO THUMBNAIL MANAGER & UPLOAD PANEL */}
+          {activeTool === 'video_thumbnail' && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="relative w-14 h-10 rounded-lg overflow-hidden bg-black border border-white/20 shrink-0">
+                    {currentVideoThumbnailUrl ? (
+                      <img
+                        src={currentVideoThumbnailUrl}
+                        alt="Current Video Thumbnail"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/40">
+                        <Film className="w-4 h-4" />
+                      </div>
+                    )}
+                    <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[8px] font-extrabold text-emerald-300 uppercase">
+                      {videoThumbnailSource === 'uploaded'
+                        ? 'Custom'
+                        : videoThumbnailSource === 'captured_frame'
+                        ? 'Frame'
+                        : 'Auto'}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                      <span>Current Video Thumbnail</span>
+                      {isGeneratingThumbnail && (
+                        <span className="text-[9px] text-purple-300 animate-pulse">
+                          Generating...
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-white/60 truncate">
+                      {videoThumbnailSource === 'uploaded'
+                        ? 'Custom thumbnail uploaded from your device'
+                        : videoThumbnailSource === 'captured_frame'
+                        ? `Captured from current video frame (${formatSec(videoCurrentTime)})`
+                        : 'Automatically generated when media was uploaded'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  id="video-editor-panel-upload-thumbnail-btn"
+                  type="button"
+                  onClick={() => videoThumbnailFileRef.current?.click()}
+                  className="py-2 px-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload Thumbnail File</span>
+                </button>
+                <button
+                  id="video-editor-panel-capture-frame-btn"
+                  type="button"
+                  onClick={() => {
+                    let capturedUrl = '';
+                    if (canvasRef.current) {
+                      try {
+                        capturedUrl = canvasRef.current.toDataURL('image/jpeg', 0.9);
+                      } catch {}
+                    }
+                    if (!capturedUrl && videoRef.current) {
+                      capturedUrl = captureVideoElementThumbnail(videoRef.current, {
+                        filterCss: buildCombinedFilterString(),
+                        fallbackTitle: activeTitle,
+                      });
+                    }
+                    if (capturedUrl) {
+                      setCurrentVideoThumbnailUrl(capturedUrl);
+                      setVideoThumbnailSource('captured_frame');
+                      if (onSaveEditedMedia) {
+                        onSaveEditedMedia({
+                          mediaId,
+                          mediaType: activeMediaType,
+                          editedDataUrl: activeMediaType === 'video' ? activeMediaUrl : capturedUrl,
+                          thumbnailUrl: capturedUrl,
+                          title: activeTitle,
+                        });
+                      }
+                      showToast(
+                        `📸 Uploaded current video frame (${formatSec(videoCurrentTime)}) as thumbnail!`
+                      );
+                    }
+                  }}
+                  className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Upload Current Frame</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* 8. AI STUDIO TOOLS PANEL */}
           {activeTool === 'ai_tools' && (
             <div className="space-y-2">
@@ -2577,6 +2823,7 @@ export const GalleryPhotoVideoEditorModal: React.FC<GalleryPhotoVideoEditorModal
               { id: 'adjust', label: 'Adjust', icon: Sliders },
               { id: 'focus', label: 'Focus', icon: Droplet },
               { id: 'filter', label: 'Filters (64)', icon: Sparkles },
+              { id: 'video_thumbnail', label: 'Thumbnail', icon: Film },
               { id: 'sticker', label: 'Sticker', icon: Sticker },
               { id: 'text', label: 'Text', icon: Type },
               { id: 'text_design', label: 'Text Design', icon: Bookmark },

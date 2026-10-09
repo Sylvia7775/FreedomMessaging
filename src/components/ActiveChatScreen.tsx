@@ -105,6 +105,10 @@ import {
   ChannelLiveStreamRecord,
 } from '../lib/firebase';
 import { getCleanAvatar } from '../lib/avatarHelper';
+import {
+  VerifiedCheckmarkBadge,
+  isAccountProfileValidated,
+} from './VerifiedCheckmarkBadge';
 
 interface ActiveChatScreenProps {
   contact: UserContact;
@@ -1316,7 +1320,7 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
     setShowExtendedReactions(false);
   };
 
-  // Reusable helper to render visible single / double checkmark status indicators
+  // Reusable helper to render visible single / double checkmark status indicators with smooth animated color & tick transitions
   const renderStatusIndicator = (
     status: ChatMessage['status'] | undefined,
     variant: 'bubble_green' | 'bubble_dark' | 'bubble_light' | 'image_overlay' | 'bubble_footer',
@@ -1324,72 +1328,46 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
   ) => {
     const currentStatus = status || 'sent';
 
-    let icon: React.ReactNode;
     let label = '';
     let description = '';
 
     switch (currentStatus) {
       case 'sent':
-        icon = (
-          <Check
-            className={`w-3.5 h-3.5 stroke-[2.3] ${
-              variant === 'bubble_green' || variant === 'image_overlay'
-                ? 'text-white/80'
-                : variant === 'bubble_footer'
-                ? 'text-slate-400 dark:text-slate-400'
-                : 'text-slate-400'
-            }`}
-          />
-        );
         label = 'Sent';
         description = 'Single checkmark (sent to server)';
         break;
       case 'delivered':
-        icon = (
-          <CheckCheck
-            className={`w-3.5 h-3.5 stroke-[2.2] ${
-              variant === 'bubble_green' || variant === 'image_overlay'
-                ? 'text-white/80'
-                : variant === 'bubble_footer'
-                ? 'text-slate-400 dark:text-slate-400'
-                : 'text-slate-400'
-            }`}
-          />
-        );
         label = 'Delivered';
         description = 'Double checkmarks (delivered to phone)';
         break;
       case 'read':
-        icon = (
-          <CheckCheck
-            className={`w-3.5 h-3.5 stroke-[2.6] drop-shadow-xs ${
-              variant === 'bubble_green'
-                ? 'text-sky-200'
-                : variant === 'image_overlay'
-                ? 'text-sky-300'
-                : variant === 'bubble_footer'
-                ? 'text-sky-400 font-bold'
-                : 'text-sky-500 dark:text-sky-400'
-            }`}
-          />
-        );
         label = 'Read';
         description = 'Double blue checkmarks (read by recipient)';
         break;
       case 'failed':
-        icon = (
-          <AlertCircle
-            className={`w-3.5 h-3.5 stroke-[2.4] ${
-              variant === 'bubble_green' || variant === 'image_overlay'
-                ? 'text-rose-200'
-                : 'text-rose-500'
-            }`}
-          />
-        );
         label = 'Failed';
         description = 'Failed to deliver';
         break;
     }
+
+    const baseSentDeliveredColor =
+      variant === 'bubble_green' || variant === 'image_overlay'
+        ? 'text-white/80'
+        : variant === 'bubble_footer'
+        ? 'text-slate-400 dark:text-slate-400'
+        : 'text-slate-400';
+
+    const readColor =
+      variant === 'bubble_green'
+        ? 'text-sky-200 drop-shadow-[0_0_4px_rgba(56,189,248,0.45)]'
+        : variant === 'image_overlay'
+        ? 'text-sky-300 drop-shadow-[0_0_4px_rgba(56,189,248,0.5)]'
+        : variant === 'bubble_footer'
+        ? 'text-sky-400 font-bold drop-shadow-[0_0_4px_rgba(56,189,248,0.35)]'
+        : 'text-sky-500 dark:text-sky-400 drop-shadow-[0_0_4px_rgba(56,189,248,0.35)]';
+
+    const activeTickColor = currentStatus === 'read' ? readColor : baseSentDeliveredColor;
+    const isDoubleTick = currentStatus === 'delivered' || currentStatus === 'read';
 
     return (
       <button
@@ -1402,9 +1380,42 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
           }
         }}
         title={`${label}: ${description}. Tap to cycle status`}
-        className="inline-flex items-center gap-0.5 group/tick hover:opacity-100 transition-transform active:scale-90 cursor-pointer p-0.5 -m-0.5 rounded"
+        className="inline-flex items-center gap-0.5 group/tick hover:opacity-100 transition-all duration-300 active:scale-90 cursor-pointer p-0.5 -m-0.5 rounded"
       >
-        {icon}
+        {currentStatus === 'failed' ? (
+          <AlertCircle
+            className={`w-3.5 h-3.5 stroke-[2.4] transition-colors duration-500 ease-in-out ${
+              variant === 'bubble_green' || variant === 'image_overlay'
+                ? 'text-rose-200'
+                : 'text-rose-500'
+            }`}
+          />
+        ) : (
+          <span
+            className={`relative inline-flex items-center justify-center w-4 h-3.5 transition-all duration-500 ease-out ${activeTickColor} ${
+              currentStatus === 'read' ? 'scale-105' : 'scale-100'
+            }`}
+          >
+            {/* Single Checkmark (smoothly fades out as Double Checkmark fades & slides in) */}
+            <Check
+              className={`w-3.5 h-3.5 stroke-[2.3] transition-all duration-500 ease-in-out ${
+                isDoubleTick
+                  ? 'opacity-0 scale-75 -translate-x-0.5 pointer-events-none'
+                  : 'opacity-100 scale-100 translate-x-0'
+              }`}
+            />
+            {/* Double Checkmark (smoothly transitions from sent -> delivered -> read blue color) */}
+            <CheckCheck
+              className={`absolute inset-0 w-3.5 h-3.5 m-auto transition-all duration-500 ease-in-out ${
+                currentStatus === 'read' ? 'stroke-[2.6]' : 'stroke-[2.2]'
+              } ${
+                isDoubleTick
+                  ? 'opacity-100 scale-100 translate-x-0'
+                  : 'opacity-0 scale-75 translate-x-0.5 pointer-events-none'
+              }`}
+            />
+          </span>
+        )}
       </button>
     );
   };
@@ -1687,6 +1698,14 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                   <h2 className="text-base font-bold tracking-tight text-white leading-tight truncate">
                     {contact.name}
                   </h2>
+                  {isAccountProfileValidated(contact) && (
+                    <VerifiedCheckmarkBadge
+                      id="chat-header-verified-badge"
+                      variant="header"
+                      size="md"
+                      title={`${contact.name} • Account Profile Validation Completed (Verified Account)`}
+                    />
+                  )}
                   {isChannelChat && (
                     <span className="text-[9px] bg-white/25 text-white font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider shrink-0 flex items-center gap-0.5">
                       <Megaphone className="w-2.5 h-2.5" />
@@ -2303,6 +2322,12 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                     )}
                   </div>
                   <span className="truncate max-w-[76px]">{participant.name.split(' ')[0]}</span>
+                  {isAccountProfileValidated(participant) && (
+                    <VerifiedCheckmarkBadge
+                      size="xs"
+                      title={`${participant.name} • Verified Account`}
+                    />
+                  )}
                   <span
                     style={{
                       backgroundColor: `${primaryColor}20`,

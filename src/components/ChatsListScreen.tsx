@@ -29,6 +29,10 @@ import {
 import { UserContact, ScreenView, ThemeMode } from '../types';
 import { saveContactOrChannelToDb } from '../lib/firebase';
 import { SnapFaceFilterCameraModal } from './SnapFaceFilterCameraModal';
+import {
+  VerifiedCheckmarkBadge,
+  isAccountProfileValidated,
+} from './VerifiedCheckmarkBadge';
 
 interface ChatsListScreenProps {
   contacts: UserContact[];
@@ -1006,6 +1010,13 @@ export const ChatsListScreen: React.FC<ChatsListScreenProps> = ({
                         <h2 className="font-bold text-sm tracking-tight truncate">
                           {contact.name}
                         </h2>
+                        {isAccountProfileValidated(contact) && (
+                          <VerifiedCheckmarkBadge
+                            id={`chat-list-verified-badge-${contact.id}`}
+                            size="sm"
+                            title={`${contact.name} • Account Profile Validation Completed`}
+                          />
+                        )}
                         {(contact.isChannel || contact.entityType === 'channel') && (
                           <span
                             style={{

@@ -688,6 +688,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             {brandConfig.appDescription ||
               'Next-generation secure communication with Apache Cordova packaging & 2FA security'}
           </p>
+          <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-extrabold">
+            <Lock className="w-3 h-3 shrink-0" />
+            <span>Login or Register Required to Access Encrypted Chats</span>
+          </div>
         </div>
 
         {/* ============================================================== */}

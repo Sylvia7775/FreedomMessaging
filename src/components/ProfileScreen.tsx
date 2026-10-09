@@ -13,7 +13,6 @@ import {
   LogOut,
   Camera,
   Upload,
-  Database,
   CheckCircle2,
   FileImage,
   Loader2,
@@ -52,6 +51,11 @@ import QRCode from 'qrcode';
 import { AVAILABLE_LANGUAGES, INITIAL_CONTACTS } from '../data/mockData';
 import { ScreenView, ThemeMode, UserProfile, ChatMessage, ActiveMediaItem, SocialPlatform, SocialLinkItem, UserContact } from '../types';
 import { FriendshipModal } from './FriendshipModal';
+import {
+  VerifiedCheckmarkBadge,
+  getProfileValidationSummary,
+  markAccountProfileValidatedLocally,
+} from './VerifiedCheckmarkBadge';
 import { uploadUserAvatarInDb, saveUserProfileToDb, updateUserOnlinePrivacyInDb, deleteMyUserAccountFromDb } from '../lib/firebase';
 import { getCleanAvatar, getInitialsAvatar, clearSavedUserAvatar, saveUserAvatarLocally } from '../lib/avatarHelper';
 import {
@@ -81,6 +85,7 @@ import {
   getFingerprintRecord,
   setFingerprint2FAEnabled,
 } from '../lib/fingerprintAuthHelper';
+import { generateProfileThumbnailFile } from '../lib/videoPlatformHelper';
 
 interface ProfileScreenProps {
   onNavigate: (screen: ScreenView) => void;
@@ -176,22 +181,59 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   });
 
-  const handleUploadProfileCover = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [profileThumbnailUrl, setProfileThumbnailUrl] = useState<string>(() => {
+    try {
+      return (
+        currentUser.avatarThumbnailUrl ||
+        localStorage.getItem(`freedom_profile_thumbnail_${currentUser.id || 'user_abdullah'}`) ||
+        ''
+      );
+    } catch {
+      return '';
+    }
+  });
+  const [profileCoverThumbnailUrl, setProfileCoverThumbnailUrl] = useState<string>(() => {
+    try {
+      return (
+        currentUser.profileCoverThumbnailUrl ||
+        localStorage.getItem(
+          `freedom_profile_cover_thumbnail_${currentUser.id || 'user_abdullah'}`
+        ) ||
+        ''
+      );
+    } catch {
+      return '';
+    }
+  });
+
+  const handleUploadProfileCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setProfileCoverUrl(dataUrl);
-      try {
-        localStorage.setItem('freedom_my_profile_cover', dataUrl);
-      } catch {}
-      onUpdateCurrentUser({ ...currentUser, profileCoverUrl: dataUrl });
-      setUploadStatusMsg('Uploaded new User Profile Cover!');
-      setTimeout(() => setUploadStatusMsg(null), 3200);
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    try {
+      const thumbRes = await generateProfileThumbnailFile(file, 320, 180, 960);
+      setProfileCoverUrl(thumbRes.dataUrl);
+      setProfileCoverThumbnailUrl(thumbRes.thumbnailDataUrl);
+      try {
+        localStorage.setItem('freedom_my_profile_cover', thumbRes.dataUrl);
+        localStorage.setItem(
+          `freedom_profile_cover_thumbnail_${currentUser.id || 'user_abdullah'}`,
+          thumbRes.thumbnailDataUrl
+        );
+      } catch {}
+      onUpdateCurrentUser({
+        ...currentUser,
+        profileCoverUrl: thumbRes.dataUrl,
+        profileCoverThumbnailUrl: thumbRes.thumbnailDataUrl,
+      });
+      setUploadStatusMsg(
+        `✅ Uploaded Profile Cover & automatically generated ${thumbRes.thumbnailDimensions} thumbnail!`
+      );
+      setTimeout(() => setUploadStatusMsg(null), 3500);
+    } catch {
+      setUploadStatusMsg('Failed to upload Profile Cover.');
+      setTimeout(() => setUploadStatusMsg(null), 3000);
+    }
   };
 
   const handleUploadProfileWallpaper = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,10 +321,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editName, setEditName] = useState(currentUser.name);
   const [editUsername, setEditUsername] = useState(
-    (currentUser.username || 'sajol_freedom').replace(/^@+/, '')
+    (currentUser.username || 'weedchat_user').replace(/^@+/, '')
   );
   const [editBio, setEditBio] = useState(
-    currentUser.bio || 'WeedChat Official Administration & User Support Desk'
+    currentUser.bio || 'Freedom talk any person of your mother language 🕊️'
   );
   const [editAge, setEditAge] = useState<string>(
     currentUser.age !== undefined && currentUser.age !== null ? String(currentUser.age) : ''
@@ -290,11 +332,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [editGender, setEditGender] = useState<string>(currentUser.gender || '');
   const [editLocation, setEditLocation] = useState(currentUser.location || 'New York,NY');
   const [editEmail, setEditEmail] = useState(
-    currentUser.email || 'MobilePhonesky987@gmail.com'
+    currentUser.email || `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`
   );
   const [editPhoneNumber, setEditPhoneNumber] = useState(
     currentUser.phoneNumber || '+1 (555) 234-8901'
   );
+
+  // Sync profile form fields whenever currentUser changes (e.g., after registration or login)
+  React.useEffect(() => {
+    setEditName(currentUser.name || 'WeedChat User');
+    setEditUsername((currentUser.username || 'weedchat_user').replace(/^@+/, ''));
+    setEditBio(currentUser.bio || 'Freedom talk any person of your mother language 🕊️');
+    setEditAge(
+      currentUser.age !== undefined && currentUser.age !== null ? String(currentUser.age) : ''
+    );
+    setEditGender(currentUser.gender || '');
+    setEditLocation(currentUser.location || 'New York,NY');
+    setEditEmail(
+      currentUser.email || `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`
+    );
+    setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
+  }, [
+    currentUser.id,
+    currentUser.name,
+    currentUser.username,
+    currentUser.bio,
+    currentUser.age,
+    currentUser.gender,
+    currentUser.location,
+    currentUser.email,
+    currentUser.phoneNumber,
+  ]);
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [isEditingInlineUsername, setIsEditingInlineUsername] = useState(false);
   const [isEditingInlineBio, setIsEditingInlineBio] = useState(false);
@@ -608,44 +676,67 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  // Handle targeting user files on device and automatically saving uploaded avatar
+  // Handle targeting user files on device and automatically saving uploaded avatar + auto-generated thumbnail
   const handleFileTarget = async (file: File) => {
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setUploadStatusMsg('Please select a valid image file (PNG, JPG, WebP, etc.).');
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+      setUploadStatusMsg('Please select a valid image or video file (PNG, JPG, WebP, MP4, etc.).');
       setTimeout(() => setUploadStatusMsg(null), 3000);
       return;
     }
 
     try {
       setIsUploading(true);
-      setUploadStatusMsg(`Uploading & auto-saving avatar: ${file.name}...`);
-
-      const result = await uploadUserAvatarInDb(
-        currentUser.id || 'user_abdullah',
-        file,
-        currentUser.name || 'Abdullah'
+      setUploadStatusMsg(
+        `Uploading & automatically generating profile thumbnail for: ${file.name}...`
       );
+
+      // Automatically generate 180×180 center-cropped profile thumbnail (works for both image & video files)
+      const thumbGen = await generateProfileThumbnailFile(file, 180, 180, 720);
+
+      let resolvedAvatarUrl = thumbGen.dataUrl;
+      let resolvedFileName = thumbGen.fileName;
+      let resolvedFileSize = thumbGen.fileSize;
+
+      if (file.type.startsWith('image/')) {
+        const result = await uploadUserAvatarInDb(
+          currentUser.id || 'user_abdullah',
+          file,
+          currentUser.name || 'Abdullah'
+        );
+        resolvedAvatarUrl = result.avatarUrl || thumbGen.dataUrl;
+        resolvedFileName = result.fileName || thumbGen.fileName;
+        resolvedFileSize = result.fileSize || thumbGen.fileSize;
+      }
 
       saveUserAvatarLocally(
         currentUser.id || 'user_abdullah',
-        result.avatarUrl,
-        result.fileName,
-        result.fileSize
+        resolvedAvatarUrl,
+        resolvedFileName,
+        resolvedFileSize
       );
+
+      try {
+        localStorage.setItem(
+          `freedom_profile_thumbnail_${currentUser.id || 'user_abdullah'}`,
+          thumbGen.thumbnailDataUrl
+        );
+      } catch {}
+      setProfileThumbnailUrl(thumbGen.thumbnailDataUrl);
 
       const updatedUser: UserProfile = {
         ...currentUser,
-        avatar: result.avatarUrl,
-        avatarFileName: result.fileName,
-        avatarFileSize: result.fileSize,
+        avatar: resolvedAvatarUrl,
+        avatarThumbnailUrl: thumbGen.thumbnailDataUrl,
+        avatarFileName: resolvedFileName,
+        avatarFileSize: resolvedFileSize,
         avatarUpdatedAt: new Date().toISOString(),
       };
 
       onUpdateCurrentUser(updatedUser);
       setUploadStatusMsg(
-        `✅ Automatically saved uploaded avatar "${result.fileName}" (${result.fileSize})`
+        `✅ Uploaded "${resolvedFileName}" & automatically generated ${thumbGen.thumbnailDimensions} profile thumbnail!`
       );
 
       setTimeout(() => {
@@ -653,7 +744,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       }, 4500);
     } catch (err: any) {
       console.error('Avatar upload failed:', err);
-      setUploadStatusMsg('Upload failed. Please try another image.');
+      setUploadStatusMsg('Upload failed. Please try another media file.');
     } finally {
       setIsUploading(false);
     }
@@ -698,6 +789,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     const cleanBio = editBio.trim() || currentUser.bio || 'Freedom talk any person of your mother language';
     const cleanAge = editAge.trim();
     const cleanGender = editGender.trim();
+    const validatedNow = markAccountProfileValidatedLocally(
+      currentUser.id || 'admin_mobilephonesky'
+    );
     const updated: UserProfile = {
       ...currentUser,
       name: editName.trim() || currentUser.name,
@@ -709,6 +803,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       email: cleanEmail,
       phoneNumber: cleanPhone,
       hidePhoneNumberPublic,
+      isVerified: true,
+      profileValidatedAt: currentUser.profileValidatedAt || validatedNow,
     };
     onUpdateCurrentUser(updated);
     setIsEditingProfile(false);
@@ -744,6 +840,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         phoneNumber: cleanPhone,
         hidePhoneNumberPublic,
         motherLanguage,
+        isVerified: true,
+        profileValidatedAt: updated.profileValidatedAt,
       });
       setUploadStatusMsg('Profile, @Username, About, Age, Gender, Email & Phone synced to database');
       setTimeout(() => setUploadStatusMsg(null), 3000);
@@ -886,7 +984,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm"
         className="hidden"
         onChange={handleFileInputChange}
       />
@@ -894,7 +992,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         ref={profileCoverInputRef}
         id="my-profile-cover-file-input"
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         className="hidden"
         onChange={handleUploadProfileCover}
       />
@@ -925,27 +1023,44 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-white">Profile</h1>
-            <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/20 text-white px-2 py-0.5 rounded-full">
-              <Database className="w-2.5 h-2.5 text-white/90" />
-              Firestore DB
-            </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
-              id="profile-header-admin-panel-btn"
+              id="profile-header-open-chats-btn"
               type="button"
-              onClick={() => onNavigate('admin')}
-              className="px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-              title="Open Admin Control Panel & Reported Media Moderation"
+              onClick={() => onNavigate('chats')}
+              className="px-2.5 py-1.5 rounded-full bg-emerald-500/90 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+              title="Open WhatsApp-style Encrypted Chats"
             >
-              <Shield className="w-3.5 h-3.5 text-amber-300" />
-              <span>Admin Panel</span>
-              {pendingMediaReportsCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
-                  {pendingMediaReportsCount}
-                </span>
-              )}
+              <span>Chats</span>
             </button>
+            <button
+              id="profile-header-switch-register-btn"
+              type="button"
+              onClick={onLogout}
+              className="px-2.5 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-[11px] font-extrabold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+              title="Sign Out or Register a New User Account"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Switch / Logout</span>
+            </button>
+            {isAdminVerified && (
+              <button
+                id="profile-header-admin-panel-btn"
+                type="button"
+                onClick={() => onNavigate('admin')}
+                className="px-2.5 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-[11px] font-extrabold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                title="Open Admin Control Panel"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-300" />
+                <span>Admin</span>
+                {pendingMediaReportsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                    {pendingMediaReportsCount}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               onClick={onToggleTheme}
               className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all cursor-pointer"
@@ -1039,10 +1154,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
           </div>
 
-          <div className="p-4 pt-2">
-          <div className="flex items-start gap-4 -mt-8 relative z-10">
+          <div className="p-4 pt-3">
+          <div className="flex items-start gap-4 relative z-10">
             {/* Avatar with Camera Trigger & Target File Overlay */}
-            <div className="relative group shrink-0">
+            <div className="relative group shrink-0 -mt-10">
               <div
                 onClick={() => fileInputRef.current?.click()}
                 style={{ borderColor: primaryColor, width: '100px', height: '100px' }}
@@ -1084,7 +1199,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               {!isEditingProfile ? (
                 <>
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <h2 className="font-extrabold text-base tracking-tight truncate">
                         {currentUser.name}
                       </h2>
@@ -1107,7 +1222,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       type="button"
                       onClick={() => {
                         setEditName(currentUser.name);
-                        setEditUsername((currentUser.username || 'sajol_freedom').replace(/^@+/, ''));
+                        setEditUsername((currentUser.username || 'weedchat_user').replace(/^@+/, ''));
                         setEditBio(currentUser.bio || '');
                         setEditAge(
                           currentUser.age !== undefined && currentUser.age !== null
@@ -1116,7 +1231,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         );
                         setEditGender(currentUser.gender || '');
                         setEditLocation(currentUser.location || 'New York,NY');
-                        setEditEmail(currentUser.email || 'MobilePhonesky987@gmail.com');
+                        setEditEmail(
+                          currentUser.email ||
+                            `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`
+                        );
                         setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
                         setIsEditingProfile(true);
                       }}
@@ -1207,7 +1325,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       )}
                     </div>
                   )}
-                  <div className="mt-0.5 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="mt-1 flex items-center justify-between gap-3 flex-wrap">
                     <p className="text-xs text-slate-400 flex items-center gap-1.5">
                       <span
                         style={{ backgroundColor: primaryColor }}
@@ -1215,39 +1333,52 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       />
                       <span>{currentUser.statusText || (currentUser.hideOnlineStatus ? 'Offline' : 'Busy')}</span>
                     </p>
-                    <span
-                      id="my-profile-location-display"
-                      className={`text-xs sm:text-sm font-medium tracking-tight ${
-                        isDark ? 'text-slate-100' : 'text-slate-900'
-                      }`}
-                    >
-                      {currentUser.location || 'New York,NY'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        id="my-profile-location-display"
+                        className={`text-xs sm:text-sm font-medium tracking-tight ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                      >
+                        {currentUser.location || 'New York,NY'}
+                      </span>
+                      {getProfileValidationSummary(currentUser).isValidated && (
+                        <VerifiedCheckmarkBadge
+                          id="my-profile-verified-badge"
+                          variant="profile_seal"
+                          title="Verified Profile • Account Profile Validation Completed"
+                        />
+                      )}
+                    </div>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditName(currentUser.name);
-                        setEditBio(currentUser.bio || '');
-                        setEditLocation(currentUser.location || 'New York,NY');
-                        setEditEmail(currentUser.email || 'MobilePhonesky987@gmail.com');
-                        setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
-                        setIsEditingProfile(true);
-                      }}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border cursor-pointer hover:border-purple-500/60 transition-colors ${
-                        isDark
-                          ? 'bg-slate-800/70 border-slate-700 text-slate-200'
-                          : 'bg-white border-slate-200 text-slate-700'
-                      }`}
-                      title="Click to edit Email Address"
-                    >
-                      <Mail style={{ color: primaryColor }} className="w-3 h-3 shrink-0" />
-                      <span className="font-mono truncate max-w-[160px]">
-                        {currentUser.email || 'MobilePhonesky987@gmail.com'}
-                      </span>
-                      <Edit2 className="w-2.5 h-2.5 text-slate-400" />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditName(currentUser.name);
+                          setEditBio(currentUser.bio || '');
+                          setEditLocation(currentUser.location || 'New York,NY');
+                          setEditEmail(
+                            currentUser.email ||
+                              `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`
+                          );
+                          setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
+                          setIsEditingProfile(true);
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border cursor-pointer hover:border-purple-500/60 transition-colors ${
+                          isDark
+                            ? 'bg-slate-800/70 border-slate-700 text-slate-200'
+                            : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                        title="Click to edit Email Address"
+                      >
+                        <Mail style={{ color: primaryColor }} className="w-3 h-3 shrink-0" />
+                        <span className="font-mono truncate max-w-[160px]">
+                          {currentUser.email ||
+                            `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`}
+                        </span>
+                        <Edit2 className="w-2.5 h-2.5 text-slate-400" />
+                      </button>
 
                     {isEditingInlinePhone ? (
                       <div className="flex items-center gap-1.5 flex-wrap w-full pt-1">
@@ -1418,6 +1549,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       <Camera className="w-3.5 h-3.5" />
                       <span>Upload & Auto-Save Avatar</span>
                     </button>
+                    {getProfileValidationSummary(currentUser).isValidated ? (
+                      <VerifiedCheckmarkBadge
+                        id="my-profile-validated-pill"
+                        variant="pill"
+                        label="Profile Validated"
+                        title="Your account profile validation is complete and your verified checkmark appears in the chat header"
+                      />
+                    ) : (
+                      <button
+                        id="complete-profile-validation-btn"
+                        type="button"
+                        onClick={handleSaveProfileEdits}
+                        className="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-xs"
+                        title="Complete Account Profile Validation to display the verified checkmark next to your name"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Validate Profile</span>
+                      </button>
+                    )}
                   </div>
                 </>
               ) : (
@@ -1594,6 +1744,60 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
           </div>
 
+          {/* Auto-Generated User Profile Thumbnail Bar */}
+          <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-purple-500/40 shrink-0 bg-slate-900">
+                <img
+                  src={
+                    profileThumbnailUrl ||
+                    currentUser.avatarThumbnailUrl ||
+                    getCleanAvatar(currentUser.avatar, currentUser.name)
+                  }
+                  alt="Auto-Generated Profile Thumbnail"
+                  className="w-full h-full object-cover"
+                />
+                <span className="absolute bottom-0 right-0 px-1 py-0.2 bg-emerald-600 text-[7px] font-extrabold text-white uppercase">
+                  Thumb
+                </span>
+              </div>
+              {profileCoverThumbnailUrl && (
+                <div className="relative w-14 h-10 rounded-xl overflow-hidden border border-indigo-500/40 shrink-0 bg-slate-900">
+                  <img
+                    src={profileCoverThumbnailUrl}
+                    alt="Auto-Generated Cover Thumbnail"
+                    className="w-full h-full object-cover"
+                  />
+                  <span className="absolute bottom-0 right-0 px-1 py-0.2 bg-indigo-600 text-[7px] font-extrabold text-white uppercase">
+                    Cover
+                  </span>
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold flex items-center gap-1">
+                  <span>Auto-Generated Profile Thumbnail</span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-500 text-[9px] font-extrabold">
+                    180×180 HD
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 truncate">
+                  Automatically generated when uploading profile photo or video
+                </p>
+              </div>
+            </div>
+            <button
+              id="profile-upload-auto-thumbnail-btn"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{ backgroundColor: `${primaryColor}18`, color: primaryColor }}
+              className="px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold flex items-center gap-1 hover:brightness-110 shrink-0 cursor-pointer transition-all"
+              title="Upload Profile Photo or Video to Automatically Generate Thumbnail"
+            >
+              <Camera className="w-3 h-3" />
+              <span>Upload & Generate</span>
+            </button>
+          </div>
+
           {/* Uploading status banner */}
           {uploadStatusMsg && (
             <div
@@ -1602,20 +1806,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             >
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{uploadStatusMsg}</span>
-            </div>
-          )}
-
-          {/* Metadata of user file in database */}
-          {currentUser.avatarFileName && (
-            <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-1 rounded-lg">
-              <FileImage style={{ color: primaryColor }} className="w-3 h-3 shrink-0" />
-              <span className="font-semibold text-slate-600 dark:text-slate-300 truncate">
-                {currentUser.avatarFileName}
-              </span>
-              {currentUser.avatarFileSize && (
-                <span className="text-slate-400">({currentUser.avatarFileSize})</span>
-              )}
-              <span style={{ color: primaryColor }} className="ml-auto font-bold">Stored in DB</span>
             </div>
           )}
 
@@ -2145,37 +2335,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             }}
             onRemove={handleRemoveSocialLink}
           />
-        </div>
-
-        {/* Database Status Card */}
-        <div
-          className={`p-3.5 rounded-2xl flex items-center justify-between border ${
-            isDark ? 'bg-[#1A202C] border-slate-800' : 'bg-slate-50 border-slate-200/70'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            <div
-              style={{ backgroundColor: `${primaryColor}18`, color: primaryColor }}
-              className="w-8 h-8 rounded-full flex items-center justify-center"
-            >
-              <Database className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <h4 className="text-xs font-bold">Users App Database</h4>
-                <span style={{ backgroundColor: primaryColor }} className="w-2 h-2 rounded-full animate-pulse" />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Cloud Firestore synced for profiles & avatars
-              </p>
-            </div>
-          </div>
-          <span
-            style={{ backgroundColor: `${primaryColor}18`, color: primaryColor }}
-            className="text-[10px] font-bold px-2.5 py-1 rounded-full"
-          >
-            Online
-          </span>
         </div>
 
         {/* My Contact QR Code Card */}

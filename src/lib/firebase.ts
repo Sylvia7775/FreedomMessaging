@@ -211,15 +211,67 @@ export const EXAMPLE_USER_NAMES_TO_PURGE = new Set([
 
 export function isExampleUserRecord(id: string, data?: Record<string, any>): boolean {
   if (!id) return false;
-  if (id === 'admin_mobilephonesky') return false;
-  const email = String(data?.email || '').toLowerCase();
-  if (email && email === ADMIN_EMAIL.toLowerCase()) return false;
   if (EXAMPLE_USER_IDS_TO_PURGE.has(id)) return true;
   const nameLower = String(data?.name || '').trim().toLowerCase();
   if (EXAMPLE_USER_NAMES_TO_PURGE.has(nameLower)) return true;
   const usernameLower = String(data?.username || '').trim().toLowerCase();
   if (EXAMPLE_USER_IDS_TO_PURGE.has(usernameLower)) return true;
   return false;
+}
+
+/**
+ * Logout Admin everywhere across the app (Firebase Auth, localStorage, sessionStorage, and Firestore status)
+ */
+export async function logoutAdminEverywhereInDb(): Promise<void> {
+  try {
+    localStorage.removeItem('freedom_admin_verified');
+    localStorage.removeItem('freedom_admin_verified_v4');
+    localStorage.removeItem('freedom_user_authenticated');
+    const savedProfileRaw = localStorage.getItem('freedom_current_user_profile');
+    if (savedProfileRaw) {
+      const parsed = JSON.parse(savedProfileRaw);
+      if (
+        parsed?.id === 'admin_mobilephonesky' ||
+        String(parsed?.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase()
+      ) {
+        localStorage.removeItem('freedom_current_user_profile');
+        localStorage.removeItem('freedom_active_user_session_v4');
+        localStorage.removeItem('freedom_current_user_id');
+      }
+    }
+    const savedSessionRaw = localStorage.getItem('freedom_active_user_session_v4');
+    if (savedSessionRaw) {
+      const parsed = JSON.parse(savedSessionRaw);
+      if (
+        parsed?.id === 'admin_mobilephonesky' ||
+        String(parsed?.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase()
+      ) {
+        localStorage.removeItem('freedom_active_user_session_v4');
+      }
+    }
+  } catch {}
+
+  try {
+    if (auth.currentUser) {
+      await firebaseSignOut(auth);
+    }
+  } catch {}
+
+  try {
+    await setDoc(
+      doc(db, 'users', 'admin_mobilephonesky'),
+      {
+        id: 'admin_mobilephonesky',
+        isOnline: false,
+        online: false,
+        status: 'offline',
+        statusText: 'Logged Out',
+        time: 'Offline',
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch {}
 }
 
 /**
@@ -243,11 +295,15 @@ export function subscribeUsersFromDb(
         const isAdminDoc =
           docSnap.id === 'admin_mobilephonesky' ||
           String(data?.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
-        const isUserBlocked = !isAdminDoc && (data.isBlocked === true || data.status === 'blocked');
-        const rawUserName = data.name || 'WeedChat Support & Admin';
+        // Admin is logged out everywhere in the app — do not inject admin into user contacts
+        if (isAdminDoc) {
+          return;
+        }
+        const isUserBlocked = data.isBlocked === true || data.status === 'blocked';
+        const rawUserName = data.name || 'WeedChat User';
         const userName = rawUserName
-          .replace(/Freedom Support & Admin/gi, 'WeedChat Support & Admin')
-          .replace(/Freedom Admin/gi, 'WeedChat Admin')
+          .replace(/Freedom Support & Admin/gi, 'WeedChat User')
+          .replace(/Freedom Admin/gi, 'WeedChat User')
           .replace(/Freedom Messaging/gi, 'WeedChat');
         const savedLocal = getSavedAvatarRecord(docSnap.id);
         const cleanAvatar = getCleanAvatar(
@@ -258,7 +314,7 @@ export function subscribeUsersFromDb(
         );
         const rawLastMsg =
           data.lastMessage ||
-          'Welcome to WeedChat! Communicate with any person in your mother language.';
+          'Hey there! I am using WeedChat.';
         const cleanLastMsg = rawLastMsg
           .replace(/Welcome to Freedom!/gi, 'Welcome to WeedChat!')
           .replace(/Freedom Messaging/gi, 'WeedChat')
@@ -266,7 +322,7 @@ export function subscribeUsersFromDb(
         const rawBio = data.bio
           ? String(data.bio)
               .replace(/Freedom Messaging/gi, 'WeedChat')
-              .replace(/Freedom Support & Admin/gi, 'WeedChat Support & Admin')
+              .replace(/Freedom Support & Admin/gi, 'WeedChat User')
           : undefined;
         users.push({
           id: docSnap.id,
@@ -280,7 +336,7 @@ export function subscribeUsersFromDb(
           status: data.status || (isUserBlocked ? 'blocked' : 'active'),
           statusText: isUserBlocked
             ? 'Blocked'
-            : (data.statusText || rawBio || 'Official Administrator').replace(
+            : (data.statusText || rawBio || 'Available on WeedChat').replace(
                 /Freedom Messaging/gi,
                 'WeedChat'
               ),
@@ -289,8 +345,8 @@ export function subscribeUsersFromDb(
           isBanned: data.isBanned,
           phoneNumber: data.phoneNumber,
           hidePhoneNumberPublic: Boolean(data.hidePhoneNumberPublic),
-          email: data.email || (isAdminDoc ? ADMIN_EMAIL : undefined),
-          username: data.username || (isAdminDoc ? 'mobilephonesky987' : undefined),
+          email: data.email,
+          username: data.username,
           location: data.location || 'New York,NY',
           age: data.age,
           gender: data.gender,
@@ -300,11 +356,11 @@ export function subscribeUsersFromDb(
           profileWallpaperUrl: data.profileWallpaperUrl,
           avatarFileName: savedLocal?.avatarFileName || data.avatarFileName,
           avatarFileSize: savedLocal?.avatarFileSize || data.avatarFileSize,
-          isArchived: isAdminDoc ? false : data.isArchived === true,
+          isArchived: data.isArchived === true,
           archivedAt: data.archivedAt,
-          isDeleted: isAdminDoc ? false : data.isDeleted === true,
+          isDeleted: data.isDeleted === true,
           deletedAt: data.deletedAt,
-          isPinned: isAdminDoc ? true : data.isPinned === true,
+          isPinned: data.isPinned === true,
           // Group & Channel properties
           entityType: data.entityType || (data.isChannel ? 'channel' : data.isGroup ? 'group' : 'individual'),
           isGroup: Boolean(data.isGroup || data.entityType === 'group'),
@@ -321,17 +377,23 @@ export function subscribeUsersFromDb(
           channelPrivacy: data.channelPrivacy,
           subscribersCount: typeof data.subscribersCount === 'number' ? data.subscribersCount : undefined,
           channelAdminId: data.channelAdminId,
+          isVerified:
+            typeof data.isVerified === 'boolean'
+              ? data.isVerified
+              : Boolean(
+                  data.profileValidatedAt ||
+                    (data.name && data.username && data.email && data.phoneNumber && data.bio)
+                ),
+          profileValidatedAt: data.profileValidatedAt,
         });
       });
 
-      // Always guarantee the App Owner / Admin is present so the list is never blank
-      const hasAdminInList = users.some(
-        (u) =>
-          u.id === 'admin_mobilephonesky' ||
-          String(u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase()
-      );
-      if (!hasAdminInList && INITIAL_CONTACTS[0]) {
-        users.unshift(INITIAL_CONTACTS[0]);
+      // Merge with default WhatsApp-style contacts so the user's Chats list is always populated
+      const existingIds = new Set(users.map((u) => u.id));
+      for (const defaultContact of INITIAL_CONTACTS) {
+        if (!existingIds.has(defaultContact.id)) {
+          users.push(defaultContact);
+        }
       }
 
       onUpdate(users);
@@ -376,90 +438,13 @@ export async function signInWithGoogleAuth(): Promise<{ user: UserProfile; isAdm
 }
 
 /**
- * Purge all existing example users in Firestore and ensure ONLY the App Owner / Admin remains
+ * Ensure Admin is logged out in Firestore and seed initial WhatsApp-style contacts if empty
  */
 export async function seedInitialUsersIfEmpty(): Promise<void> {
   try {
-    const usersCol = collection(db, 'users');
-    const snapshot = await getDocs(usersCol);
-    let hasAdminOwner = false;
-
-    for (const docSnap of snapshot.docs) {
-      const data = docSnap.data();
-      if (docSnap.id === 'admin_mobilephonesky') {
-        hasAdminOwner = true;
-        const needsRename =
-          data?.isDeleted === true ||
-          data?.isArchived === true ||
-          String(data?.name || '').toLowerCase().includes('freedom') ||
-          String(data?.bio || '').toLowerCase().includes('freedom') ||
-          String(data?.lastMessage || '').toLowerCase().includes('freedom');
-        if (needsRename) {
-          const updatedName = String(data?.name || 'WeedChat Support & Admin')
-            .replace(/Freedom Support & Admin/gi, 'WeedChat Support & Admin')
-            .replace(/Freedom Admin/gi, 'WeedChat Admin')
-            .replace(/Freedom Messaging/gi, 'WeedChat');
-          const updatedBio = String(
-            data?.bio || 'WeedChat Official Administration & User Support Desk'
-          ).replace(/Freedom Messaging/gi, 'WeedChat');
-          const updatedLastMsg = String(
-            data?.lastMessage ||
-              'Welcome to WeedChat! Communicate with any person in your mother language.'
-          )
-            .replace(/Welcome to Freedom!/gi, 'Welcome to WeedChat!')
-            .replace(/Freedom Messaging/gi, 'WeedChat');
-          await setDoc(
-            doc(db, 'users', 'admin_mobilephonesky'),
-            {
-              id: 'admin_mobilephonesky',
-              name: updatedName,
-              bio: updatedBio,
-              lastMessage: updatedLastMsg,
-              avatar: data.avatar || INITIAL_CONTACTS[0]?.avatar || '',
-              isDeleted: false,
-              isArchived: false,
-              updatedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          ).catch(() => {});
-        }
-      } else if (isExampleUserRecord(docSnap.id, data)) {
-        try {
-          await deleteDoc(doc(db, 'users', docSnap.id));
-        } catch (delErr) {
-          console.warn(`Could not delete example user ${docSnap.id}:`, delErr);
-        }
-      }
-    }
-
-    if (!hasAdminOwner) {
-      const adminContact = INITIAL_CONTACTS[0];
-      if (adminContact) {
-        await setDoc(
-          doc(db, 'users', adminContact.id),
-          {
-            id: adminContact.id,
-            name: adminContact.name,
-            avatar: adminContact.avatar,
-            username: adminContact.username || adminContact.id,
-            lastMessage: adminContact.lastMessage,
-            time: adminContact.time,
-            isOnline: true,
-            unreadCount: 0,
-            motherLanguage: adminContact.nativeLanguage || 'English',
-            bio: adminContact.bio || 'WeedChat Official Administration & User Support Desk',
-            statusText: adminContact.statusText || 'Official Administrator',
-            location: adminContact.location || 'New York,NY',
-            isDeleted: false,
-            isArchived: false,
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-      }
-    }
+    await logoutAdminEverywhereInDb();
   } catch (error) {
-    console.warn('Could not sync/purge users in database:', error);
+    console.warn('Could not sync users in database:', error);
   }
 
   try {
@@ -642,6 +627,8 @@ export async function saveUserProfileToDb(
   if (profile.age !== undefined) cleanData.age = String(profile.age || '').slice(0, 20);
   if (profile.gender !== undefined) cleanData.gender = String(profile.gender || '').slice(0, 30);
   if (Array.isArray(profile.socialLinks)) cleanData.socialLinks = profile.socialLinks;
+  if (typeof profile.isVerified === 'boolean') cleanData.isVerified = profile.isVerified;
+  if (profile.profileValidatedAt) cleanData.profileValidatedAt = profile.profileValidatedAt;
 
   try {
     await setDoc(userRef, cleanData, { merge: true });

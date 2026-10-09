@@ -47,7 +47,11 @@ import {
   saveFriendInvitation,
 } from '../lib/friendInvitationAccess';
 import { getCleanAvatar } from '../lib/avatarHelper';
-import { optimizeUploadedImageFile } from '../lib/videoPlatformHelper';
+import {
+  VerifiedCheckmarkBadge,
+  isAccountProfileValidated,
+} from './VerifiedCheckmarkBadge';
+import { optimizeUploadedImageFile, generateProfileThumbnailFile } from '../lib/videoPlatformHelper';
 import {
   AdvancedAiSearchPanel,
   AdvancedSearchScope,
@@ -315,11 +319,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await optimizeUploadedImageFile(file, 320, 0.85);
+      const thumbGen = await generateProfileThumbnailFile(file, 180, 180, 512);
+      const dataUrl = thumbGen.dataUrl;
       if (dataUrl) {
         setCustomContactAvatar(dataUrl);
         try {
           localStorage.setItem(userAvatarStorageKey, dataUrl);
+          localStorage.setItem(
+            `freedom_profile_thumbnail_${contact.id || 'user_abdullah'}`,
+            thumbGen.thumbnailDataUrl
+          );
           if (contact.id === 'me') {
             localStorage.setItem('freedom_uploaded_profile_avatar_v1', dataUrl);
           }
@@ -328,12 +337,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               detail: {
                 userId: contact.id,
                 avatar: dataUrl,
+                thumbnailUrl: thumbGen.thumbnailDataUrl,
                 fileName: file.name,
               },
             })
           );
         } catch {}
-        setInviteToast(`✅ Avatar "${file.name}" uploaded and automatically saved!`);
+        setInviteToast(
+          `✅ Avatar "${file.name}" uploaded & ${thumbGen.thumbnailDimensions} thumbnail automatically generated!`
+        );
         setTimeout(() => setInviteToast(null), 3200);
       }
     } catch {}
@@ -1470,11 +1482,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         {/* Profile Card Body */}
-        <div className="flex-1 overflow-y-auto px-5 sm:px-7 pb-6 space-y-5 -mt-14">
+        <div className="flex-1 overflow-y-auto px-5 sm:px-7 pt-3 pb-6 space-y-5">
           {/* Avatar and Main Info Header */}
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div className="flex items-end gap-3.5">
-              <div className="relative shrink-0 group">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="relative shrink-0 group -mt-14 z-10">
                 <img
                   src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
                   alt={contact.name}
@@ -1495,8 +1507,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               <div className="mb-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
-                    {contact.name}
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight flex items-center gap-1.5">
+                    <span>{contact.name}</span>
                   </h2>
                   {isGroup ? (
                     <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
@@ -1601,13 +1613,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     </span>
                   </div>
                 )}
-                <div className="mt-0.5 flex items-center justify-between gap-4 flex-wrap">
+                <div className="mt-1 flex items-center justify-between gap-4 flex-wrap">
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
                     <span style={{ backgroundColor: primaryColor }} className="w-1.5 h-1.5 rounded-full" />
                     <span>{statusText}</span>
                   </p>
                   {!isGroup && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2">
                       {!isEditingModalLocation ? (
                         <button
                           id="user-profile-location-display"
@@ -1653,6 +1665,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                             <Check className="w-3 h-3" />
                           </button>
                         </div>
+                      )}
+                      {isAccountProfileValidated(contact) && (
+                        <VerifiedCheckmarkBadge
+                          id="profile-modal-verified-badge"
+                          variant="profile_seal"
+                          title={`${contact.name} • Verified Profile`}
+                        />
                       )}
                     </div>
                   )}

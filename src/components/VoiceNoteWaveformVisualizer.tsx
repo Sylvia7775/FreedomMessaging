@@ -487,6 +487,53 @@ export const VoiceNoteWaveformVisualizer: React.FC<VoiceNoteWaveformVisualizerPr
         </div>
       </div>
 
+      {/* Interactive Audio Progress Slider */}
+      <div
+        className="mt-1.5 px-0.5 flex items-center gap-2"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
+        <span className={`font-mono text-[10px] font-semibold shrink-0 min-w-[28px] ${bubbleStyles.timeText}`}>
+          {formatAudioTime(currentTime)}
+        </span>
+        <div className="relative flex-1 flex items-center h-4">
+          <div
+            className={`w-full h-1.5 rounded-full overflow-hidden ${
+              isMe ? 'bg-white/30' : isDark ? 'bg-slate-700/80' : 'bg-slate-200'
+            }`}
+          >
+            <div
+              className={`h-full rounded-full transition-[width] duration-75 ${
+                isMe ? 'bg-white' : 'bg-purple-500'
+              }`}
+              style={{ width: `${playbackProgress}%` }}
+            />
+          </div>
+          <input
+            id={`audio-progress-slider-${message.id}`}
+            type="range"
+            min={0}
+            max={100}
+            step={0.1}
+            value={Number.isFinite(playbackProgress) ? playbackProgress : 0}
+            aria-label="Audio message playback progress slider"
+            onChange={(e) => {
+              e.stopPropagation();
+              handleSeek(parseFloat(e.target.value));
+            }}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 m-0"
+          />
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full pointer-events-none shadow-sm transition-[left] duration-75 ${bubbleStyles.scrubber}`}
+            style={{ left: `${playbackProgress}%` }}
+          />
+        </div>
+        <span className={`font-mono text-[10px] font-semibold shrink-0 min-w-[28px] text-right ${bubbleStyles.timeText}`}>
+          {formatAudioTime(totalDuration)}
+        </span>
+      </div>
+
       {/* Bottom Row: Timestamp, Duration, and Read Status */}
       <div className="flex items-center justify-between mt-1 pt-1 border-t border-white/5 dark:border-slate-800/40 font-mono text-[10px]">
         {/* Playback time readout */}

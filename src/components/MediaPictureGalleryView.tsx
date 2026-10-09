@@ -27,10 +27,15 @@ import {
   EyeOff,
   Eye,
   AlertTriangle,
+  Upload,
 } from 'lucide-react';
 import { ChatMessage, UserContact, ThemeMode, ActiveMediaItem, GroupParticipant } from '../types';
 import { MediaPlayerModal } from './MediaPlayerModal';
 import { GalleryPhotoVideoEditorModal } from './GalleryPhotoVideoEditorModal';
+import {
+  generateVideoFileThumbnail,
+  generateProfileThumbnailFile,
+} from '../lib/videoPlatformHelper';
 import {
   MediaReportCategory,
   MEDIA_REPORT_CATEGORIES,
@@ -268,6 +273,8 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
     useState<MediaReportCategory>('forbidden_platform_content');
   const [reportReasonInput, setReportReasonInput] = useState<string>('');
   const [reportAlsoMarkAdult, setReportAlsoMarkAdult] = useState<boolean>(false);
+  const galleryUploadFileRef = React.useRef<HTMLInputElement | null>(null);
+  const [isAutoGeneratingGalleryThumb, setIsAutoGeneratingGalleryThumb] = useState<boolean>(false);
 
   useEffect(() => {
     const syncLikedGallery = () => {
@@ -1086,8 +1093,75 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
           </button>
         </div>
 
-        {/* Right Controls: Photo Editor, Video Editor & Search Bar */}
+        {/* Right Controls: Upload Media (Auto Thumbnail), Photo Editor, Video Editor & Search Bar */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          <input
+            ref={galleryUploadFileRef}
+            id="gallery-upload-media-auto-thumb-input"
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const isVideoFile = file.type.startsWith('video/');
+              setIsAutoGeneratingGalleryThumb(true);
+              try {
+                const newId = `uploaded-gallery-${Date.now()}`;
+                if (isVideoFile) {
+                  const vidRes = await generateVideoFileThumbnail(file);
+                  const updatedLiked = addMediaToLikedUserGallery({
+                    id: newId,
+                    messageId: newId,
+                    type: 'video',
+                    url: vidRes.videoUrl,
+                    thumbnailUrl: vidRes.thumbnailUrl,
+                    title: vidRes.title || 'Uploaded Video',
+                    senderName: 'You',
+                  });
+                  setLikedGalleryItems(updatedLiked);
+                  setActiveTab('videos');
+                  setGalleryToast(
+                    `🎬 Video "${vidRes.title}" uploaded & thumbnail automatically generated!`
+                  );
+                } else {
+                  const imgRes = await generateProfileThumbnailFile(file, 360, 360, 960);
+                  const cleanTitle = file.name.replace(/\.[^/.]+$/, '') || 'Uploaded Photo';
+                  const updatedLiked = addMediaToLikedUserGallery({
+                    id: newId,
+                    messageId: newId,
+                    type: 'image',
+                    url: imgRes.dataUrl,
+                    thumbnailUrl: imgRes.thumbnailDataUrl,
+                    title: cleanTitle,
+                    senderName: 'You',
+                  });
+                  setLikedGalleryItems(updatedLiked);
+                  setActiveTab('images');
+                  setGalleryToast(
+                    `📸 Photo "${cleanTitle}" uploaded & thumbnail automatically generated!`
+                  );
+                }
+                setTimeout(() => setGalleryToast(null), 3500);
+              } finally {
+                setIsAutoGeneratingGalleryThumb(false);
+              }
+              e.target.value = '';
+            }}
+          />
+          <button
+            id="gallery-upload-media-auto-thumb-btn"
+            type="button"
+            disabled={isAutoGeneratingGalleryThumb}
+            onClick={() => galleryUploadFileRef.current?.click()}
+            style={{ backgroundColor: primaryColor }}
+            className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-white flex items-center gap-1 shadow-xs hover:brightness-110 cursor-pointer transition-all"
+            title="Upload Photo or Video (Automatically generates thumbnail)"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>{isAutoGeneratingGalleryThumb ? 'Generating Thumbnail...' : 'Upload Media'}</span>
+          </button>
+
           <button
             id="gallery-open-photo-editor-btn"
             type="button"
