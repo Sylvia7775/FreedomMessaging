@@ -15,6 +15,7 @@ interface MediaGalleryModalProps {
   onToggleLikeMedia?: (mediaId: string, isLiked: boolean) => void;
   onToggleFavoriteMedia?: (mediaId: string, isFavorite: boolean) => void;
   onShareWithGroupMembers?: (media: ActiveMediaItem, memberIds: string[], note?: string) => void;
+  onShareMediaInMessage?: (mediaUrl: string, mediaType: 'image' | 'video', title?: string) => void;
 }
 
 export const MediaGalleryModal: React.FC<MediaGalleryModalProps> = ({
@@ -27,6 +28,7 @@ export const MediaGalleryModal: React.FC<MediaGalleryModalProps> = ({
   theme = 'dark',
   primaryColor = '#7C3AED',
   onShareWithGroupMembers,
+  onShareMediaInMessage,
 }) => {
   const isDark = theme === 'dark';
   const isGroup = Boolean(contact.isGroup || contact.entityType === 'group');
@@ -58,7 +60,7 @@ export const MediaGalleryModal: React.FC<MediaGalleryModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-extrabold text-base tracking-tight">
-                  {isGroup ? 'Group Gallery' : 'Media & Documents Gallery'}
+                  {isGroup ? 'Group Gallery' : 'User Media Gallery & Browser'}
                 </h3>
                 {isGroup && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
@@ -67,7 +69,7 @@ export const MediaGalleryModal: React.FC<MediaGalleryModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <span>{isGroup ? 'All media shared in' : 'Shared with'}</span>
+                <span>{isGroup ? 'All media shared in' : 'Browse & share media with'}</span>
                 <span style={{ color: primaryColor }} className="font-bold">{contact.name}</span>
                 <span>•</span>
                 <span className="text-[11px] opacity-80">
@@ -107,6 +109,12 @@ export const MediaGalleryModal: React.FC<MediaGalleryModalProps> = ({
             isGroupGallery={isGroup}
             groupParticipants={contact.participants}
             onShareWithGroupMembers={onShareWithGroupMembers}
+            onShareMediaInMessage={(mediaUrl, mediaType, title) => {
+              if (onShareMediaInMessage) {
+                onShareMediaInMessage(mediaUrl, mediaType, title);
+                onClose();
+              }
+            }}
           />
         </div>
       </div>

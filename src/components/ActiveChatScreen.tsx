@@ -63,6 +63,7 @@ import {
   Edit2,
   Save,
   BatteryCharging,
+  Upload,
 } from 'lucide-react';
 import { ChatMessage, UserContact, ThemeMode, StickerItem, ActiveMediaItem, GroupParticipant, ChannelLiveChatMessage } from '../types';
 import {
@@ -784,6 +785,28 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
         'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1200&auto=format&fit=crop&q=80'
     );
   }, [contact.id, groupCoverKey, contact.groupCoverUrl]);
+
+  useEffect(() => {
+    const handleShareGalleryMedia = (ev: Event) => {
+      const customEv = ev as CustomEvent<{
+        mediaUrl?: string;
+        mediaType?: 'image' | 'video';
+        title?: string;
+      }>;
+      const url = customEv.detail?.mediaUrl;
+      const mType = customEv.detail?.mediaType || 'image';
+      const title = customEv.detail?.title || 'Shared from User Media Gallery';
+      if (url) {
+        onSendMessage(title, mType, url);
+        setReactionFeedback(`📤 Shared "${title}" in message!`);
+        setTimeout(() => setReactionFeedback(null), 2600);
+      }
+    };
+    window.addEventListener('freedom-share-gallery-media-in-message', handleShareGalleryMedia);
+    return () => {
+      window.removeEventListener('freedom-share-gallery-media-in-message', handleShareGalleryMedia);
+    };
+  }, [onSendMessage]);
 
   const handleGroupCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -4481,13 +4504,27 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
               </div>
             )}
 
+            {/* Upload / Browse User Media Gallery Icon in Message Composer */}
+            <button
+              id="chat-upload-media-gallery-btn"
+              type="button"
+              onClick={() => {
+                setIsEmojiPickerOpen(false);
+                setIsMediaGalleryOpen(true);
+              }}
+              className="text-slate-400 hover:text-purple-500 transition-colors shrink-0 cursor-pointer"
+              title="Browse User Media Gallery & Upload Media to Message"
+            >
+              <Upload className="w-5 h-5 stroke-[1.9]" />
+            </button>
+
             {/* Paperclip (Attachment) */}
             <button
               id="chat-attach-btn"
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="text-slate-400 hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
-              title="Attach file"
+              title="Attach file from device"
             >
               <Paperclip className="w-5 h-5 -rotate-45 stroke-[1.9]" />
             </button>
@@ -4617,25 +4654,28 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
         onShareWithGroupMembers={handleShareGroupMediaToMembers}
       />
 
-      {/* Media Gallery Modal aggregating all shared images and files (Individual chats only; Group Gallery is on the Group Page only) */}
-      {!isGroupChat && (
-        <MediaGalleryModal
-          isOpen={isMediaGalleryOpen}
-          onClose={() => setIsMediaGalleryOpen(false)}
-          contact={contact}
-          messages={messages}
-          onSelectMedia={(mediaItem) => {
-            setActiveMediaItem(mediaItem);
-            setIsMediaModalOpen(true);
-          }}
-          onJumpToMessage={handleJumpToMessage}
-          theme={theme}
-          primaryColor={primaryColor}
-          onToggleLikeMedia={onToggleLikeMedia}
-          onToggleFavoriteMedia={onToggleFavoriteMedia}
-          onShareWithGroupMembers={handleShareGroupMediaToMembers}
-        />
-      )}
+      {/* Media Gallery Modal for browsing User Media Gallery & sharing media in messages */}
+      <MediaGalleryModal
+        isOpen={isMediaGalleryOpen}
+        onClose={() => setIsMediaGalleryOpen(false)}
+        contact={contact}
+        messages={messages}
+        onSelectMedia={(mediaItem) => {
+          setActiveMediaItem(mediaItem);
+          setIsMediaModalOpen(true);
+        }}
+        onJumpToMessage={handleJumpToMessage}
+        theme={theme}
+        primaryColor={primaryColor}
+        onToggleLikeMedia={onToggleLikeMedia}
+        onToggleFavoriteMedia={onToggleFavoriteMedia}
+        onShareWithGroupMembers={handleShareGroupMediaToMembers}
+        onShareMediaInMessage={(mediaUrl, mediaType, title) => {
+          onSendMessage(title || 'Shared from User Media Gallery', mediaType, mediaUrl);
+          setReactionFeedback(`📤 Shared "${title || 'Media'}" from User Media Gallery!`);
+          setTimeout(() => setReactionFeedback(null), 2800);
+        }}
+      />
 
       {/* Forward Message Modal */}
       <ForwardMessageModal

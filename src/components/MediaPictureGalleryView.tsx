@@ -28,6 +28,9 @@ import {
   Eye,
   AlertTriangle,
   Upload,
+  Camera,
+  Save,
+  UserCheck,
 } from 'lucide-react';
 import { ChatMessage, UserContact, ThemeMode, ActiveMediaItem, GroupParticipant } from '../types';
 import { MediaPlayerModal } from './MediaPlayerModal';
@@ -62,6 +65,9 @@ import {
   getLikedUserGalleryItems,
   addMediaToLikedUserGallery,
   removeMediaFromLikedUserGallery,
+  saveUserMediaSession,
+  setMediaGalleryPictureAsAvatar,
+  setMediaGalleryPictureAsProfileCover,
 } from '../lib/likedUserGalleryHelper';
 
 export type MediaTabType = 'images' | 'videos' | 'documents' | 'links' | 'all';
@@ -105,11 +111,13 @@ interface MediaPictureGalleryViewProps {
   isAdminVerified?: boolean;
   groupParticipants?: GroupParticipant[];
   onShareWithGroupMembers?: (media: ActiveMediaItem, memberIds: string[], note?: string) => void;
+  onShareMediaInMessage?: (media: ActiveMediaItem) => void;
 }
 
 export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = ({
   messages = [],
   contact,
+  currentUserId,
   theme = 'dark',
   primaryColor = '#7C3AED',
   onSelectMedia,
@@ -125,6 +133,7 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
   isAdminVerified = false,
   groupParticipants,
   onShareWithGroupMembers,
+  onShareMediaInMessage,
 }) => {
   const isDark = theme === 'dark';
   const isGroupMode = Boolean(
@@ -1122,9 +1131,10 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
                     senderName: 'You',
                   });
                   setLikedGalleryItems(updatedLiked);
+                  saveUserMediaSession(updatedLiked);
                   setActiveTab('videos');
                   setGalleryToast(
-                    `🎬 Video "${vidRes.title}" uploaded & thumbnail automatically generated!`
+                    `🎬 Video "${vidRes.title}" uploaded, thumbnail generated & session saved!`
                   );
                 } else {
                   const imgRes = await generateProfileThumbnailFile(file, 360, 360, 960);
@@ -1139,9 +1149,10 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
                     senderName: 'You',
                   });
                   setLikedGalleryItems(updatedLiked);
+                  saveUserMediaSession(updatedLiked);
                   setActiveTab('images');
                   setGalleryToast(
-                    `📸 Photo "${cleanTitle}" uploaded & thumbnail automatically generated!`
+                    `📸 Photo "${cleanTitle}" uploaded, thumbnail generated & session saved!`
                   );
                 }
                 setTimeout(() => setGalleryToast(null), 3500);
@@ -1151,6 +1162,19 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
               e.target.value = '';
             }}
           />
+          {/* Upload Camera Icon in User Media Gallery */}
+          <button
+            id="gallery-camera-upload-icon-btn"
+            type="button"
+            disabled={isAutoGeneratingGalleryThumb}
+            onClick={() => galleryUploadFileRef.current?.click()}
+            style={{ backgroundColor: primaryColor }}
+            className="w-8 h-8 rounded-xl text-white flex items-center justify-center shadow-xs hover:brightness-110 active:scale-95 cursor-pointer transition-all shrink-0"
+            title="Upload Photo or Video from Camera / Device to User Media Gallery"
+          >
+            <Camera className="w-4 h-4 stroke-[2.3]" />
+          </button>
+
           <button
             id="gallery-upload-media-auto-thumb-btn"
             type="button"
@@ -1158,10 +1182,32 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
             onClick={() => galleryUploadFileRef.current?.click()}
             style={{ backgroundColor: primaryColor }}
             className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-white flex items-center gap-1 shadow-xs hover:brightness-110 cursor-pointer transition-all"
-            title="Upload Photo or Video (Automatically generates thumbnail)"
+            title="Upload Photo or Video (Automatically generates thumbnail & saves media session)"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>{isAutoGeneratingGalleryThumb ? 'Generating Thumbnail...' : 'Upload Media'}</span>
+            <span>{isAutoGeneratingGalleryThumb ? 'Uploading...' : 'Upload Media'}</span>
+          </button>
+
+          {/* Save User Media Session Button */}
+          <button
+            id="gallery-save-media-session-btn"
+            type="button"
+            onClick={() => {
+              const session = saveUserMediaSession(likedGalleryItems);
+              setGalleryToast(
+                `💾 User Media Session saved (${session.itemsCount || allItems.length} media files persisted)!`
+              );
+              setTimeout(() => setGalleryToast(null), 3200);
+            }}
+            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 border cursor-pointer transition-all ${
+              isDark
+                ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-400'
+                : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700 shadow-2xs'
+            }`}
+            title="Save User Media Gallery Session"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Save Session</span>
           </button>
 
           <button
@@ -1963,6 +2009,106 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
                       </button>
                     )}
                   </div>
+
+                  {/* Quick Media Actions Bar: Share in Message, Set as Avatar, Set as Profile Cover */}
+                  {(isImage || isVideo) && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between gap-1 flex-wrap"
+                    >
+                      <button
+                        id={`gallery-share-in-message-btn-${item.messageId}`}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const activeMedia: ActiveMediaItem = {
+                            id: item.messageId,
+                            type: isVideo ? 'video' : 'image',
+                            title: item.title,
+                            mediaUrl: item.url,
+                            thumbnailUrl: item.thumbnailUrl || item.url,
+                            senderName: item.senderName,
+                            timestamp: item.timestamp,
+                            duration: item.duration,
+                          };
+                          if (onShareMediaInMessage) {
+                            onShareMediaInMessage(activeMedia);
+                          }
+                          window.dispatchEvent(
+                            new CustomEvent('freedom-share-gallery-media-in-message', {
+                              detail: activeMedia,
+                            })
+                          );
+                          setGalleryToast(`📤 Shared "${item.title}" in message!`);
+                          setTimeout(() => setGalleryToast(null), 3000);
+                        }}
+                        style={{ backgroundColor: `${primaryColor}18`, color: primaryColor }}
+                        className="px-2 py-1 rounded-lg text-[9.5px] font-extrabold flex items-center gap-1 cursor-pointer hover:brightness-110 transition-all"
+                        title="Share this media item in message"
+                      >
+                        <Send className="w-2.5 h-2.5" />
+                        <span>Share in Msg</span>
+                      </button>
+
+                      {isImage && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            id={`gallery-set-as-avatar-btn-${item.messageId}`}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMediaGalleryPictureAsAvatar(
+                                item.url,
+                                currentUserId || 'user_abdullah',
+                                item.title
+                              );
+                              saveUserMediaSession(likedGalleryItems, item.url, undefined);
+                              setGalleryToast(
+                                `👤 Set "${item.title}" as your Profile Avatar & saved session!`
+                              );
+                              setTimeout(() => setGalleryToast(null), 3000);
+                            }}
+                            className={`px-1.5 py-1 rounded-lg text-[9.5px] font-bold flex items-center gap-0.5 border cursor-pointer transition-all ${
+                              isDark
+                                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-400'
+                                : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
+                            }`}
+                            title="Set this media gallery picture as your Avatar"
+                          >
+                            <UserCheck className="w-2.5 h-2.5" />
+                            <span>Avatar</span>
+                          </button>
+
+                          <button
+                            id={`gallery-set-as-cover-btn-${item.messageId}`}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMediaGalleryPictureAsProfileCover(
+                                item.url,
+                                currentUserId || 'user_abdullah',
+                                contact?.id
+                              );
+                              saveUserMediaSession(likedGalleryItems, undefined, item.url);
+                              setGalleryToast(
+                                `🖼️ Set "${item.title}" as your Profile Cover & saved session!`
+                              );
+                              setTimeout(() => setGalleryToast(null), 3000);
+                            }}
+                            className={`px-1.5 py-1 rounded-lg text-[9.5px] font-bold flex items-center gap-0.5 border cursor-pointer transition-all ${
+                              isDark
+                                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-purple-300'
+                                : 'bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-700'
+                            }`}
+                            title="Set this media gallery picture as your Profile Cover"
+                          >
+                            <ImageIcon className="w-2.5 h-2.5" />
+                            <span>Cover</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );

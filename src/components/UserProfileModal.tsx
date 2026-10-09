@@ -33,6 +33,7 @@ import {
   Eye,
   EyeOff,
   Megaphone,
+  Link2,
 } from 'lucide-react';
 import { UserContact, UserProfile, ThemeMode, ChatMessage, ActiveMediaItem, GroupParticipant, SocialLinkItem, SocialPlatform } from '../types';
 import { INITIAL_GROUP_MESSAGES, INITIAL_CONTACTS } from '../data/mockData';
@@ -229,10 +230,48 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [customContactAvatar, setCustomContactAvatar] = useState<string>(() => {
     try {
       const savedForId = localStorage.getItem(userAvatarStorageKey);
-      if (savedForId && savedForId.startsWith('data:image/')) return savedForId;
+      if (savedForId && (savedForId.startsWith('data:image/') || /^https?:\/\//i.test(savedForId))) {
+        return savedForId;
+      }
     } catch {}
     return getCleanAvatar(contact.avatar, contact.name, contact.id);
   });
+  const [isModalFullAvatarOpen, setIsModalFullAvatarOpen] = useState(false);
+  const [modalAvatarUrlInput, setModalAvatarUrlInput] = useState('');
+
+  useEffect(() => {
+    const onSetAvatar = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.avatarUrl) {
+        setCustomContactAvatar(detail.avatarUrl);
+        try {
+          localStorage.setItem(userAvatarStorageKey, detail.avatarUrl);
+        } catch {}
+      }
+    };
+    const onSetCover = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.coverUrl) {
+        if (isGroup) {
+          setGroupCoverUrl(detail.coverUrl);
+          try {
+            localStorage.setItem(groupCoverStorageKey, detail.coverUrl);
+          } catch {}
+        } else {
+          setUserProfileCoverUrl(detail.coverUrl);
+          try {
+            localStorage.setItem(userCoverStorageKey, detail.coverUrl);
+          } catch {}
+        }
+      }
+    };
+    window.addEventListener('freedom-gallery-set-avatar', onSetAvatar);
+    window.addEventListener('freedom-gallery-set-cover', onSetCover);
+    return () => {
+      window.removeEventListener('freedom-gallery-set-avatar', onSetAvatar);
+      window.removeEventListener('freedom-gallery-set-cover', onSetCover);
+    };
+  }, [isGroup, groupCoverStorageKey, userCoverStorageKey, userAvatarStorageKey]);
 
   // Group Admin & Moderator permission role state
   const [groupPermissionRole, setGroupPermissionRole] = useState<'admin' | 'moderator' | 'member'>('admin');
@@ -1475,10 +1514,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="flex items-start gap-3.5">
                 <div className="relative shrink-0 group -mt-12 sm:-mt-14 z-10">
                   <img
+                    onClick={() => setIsModalFullAvatarOpen(true)}
                     src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
                     alt={contact.name}
                     style={{ borderColor: primaryColor }}
-                    className="w-26 h-26 sm:w-30 sm:h-30 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F]"
+                    className="w-26 h-26 sm:w-30 sm:h-30 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F] cursor-pointer"
+                    title="Tap to view Full Profile Avatar or Upload via URL / File"
                   />
                   <button
                     id="modal-upload-avatar-camera-btn"
@@ -3717,6 +3758,140 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           theme={theme}
           primaryColor={primaryColor}
         />
+      )}
+
+      {/* Full Profile Avatar Viewer Modal with Option 1 (Upload File) & Option 2 (Upload via URL) */}
+      {isModalFullAvatarOpen && (
+        <div
+          id="user-profile-modal-full-avatar-viewer"
+          onClick={() => setIsModalFullAvatarOpen(false)}
+          className="fixed inset-0 z-[130] bg-black/90 backdrop-blur-md flex flex-col items-center justify-between p-4 animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md flex items-center justify-between text-white py-2 px-1"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <img
+                src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
+                alt={contact.name}
+                className="w-9 h-9 rounded-full object-cover border border-white/30 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-sm font-extrabold truncate">{contact.name}</h3>
+                <p className="text-[11px] text-slate-300 truncate">
+                  @{username} • Full Profile Avatar
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsModalFullAvatarOpen(false)}
+              className="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 flex flex-col items-center justify-center w-full max-w-md py-3 gap-3 overflow-y-auto"
+          >
+            <div className="relative w-64 h-64 sm:w-76 sm:h-76 rounded-3xl overflow-hidden border-4 border-white/20 shadow-2xl bg-slate-900 shrink-0">
+              <img
+                src={
+                  modalAvatarUrlInput.trim() &&
+                  (/^https?:\/\//i.test(modalAvatarUrlInput.trim()) ||
+                    modalAvatarUrlInput.trim().startsWith('data:image/'))
+                    ? modalAvatarUrlInput.trim()
+                    : customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)
+                }
+                alt={contact.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            {/* Option 2: Upload User Avatar via URL */}
+            <div className="w-full bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-3 space-y-2">
+              <span className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5 text-purple-300" />
+                <span>Option 2: Upload User Avatar via URL</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  id="modal-full-avatar-url-input"
+                  type="url"
+                  value={modalAvatarUrlInput}
+                  onChange={(e) => setModalAvatarUrlInput(e.target.value)}
+                  placeholder="Paste image URL (https://...)"
+                  className="flex-1 px-3 py-2.5 rounded-xl bg-black/60 border border-white/20 text-white placeholder-slate-400 text-xs outline-none focus:border-purple-400"
+                />
+                <button
+                  id="modal-full-avatar-upload-url-btn"
+                  type="button"
+                  onClick={() => {
+                    const cleanUrl = modalAvatarUrlInput.trim();
+                    if (!cleanUrl) return;
+                    const formatted =
+                      /^https?:\/\//i.test(cleanUrl) || cleanUrl.startsWith('data:image/')
+                        ? cleanUrl
+                        : `https://${cleanUrl}`;
+                    setCustomContactAvatar(formatted);
+                    try {
+                      localStorage.setItem(userAvatarStorageKey, formatted);
+                      localStorage.setItem('freedom_active_user_avatar_v1', formatted);
+                      localStorage.setItem('freedom_active_user_thumbnail_v1', formatted);
+                    } catch {}
+                    setModalAvatarUrlInput('');
+                    setInviteToast('✅ Avatar uploaded & saved via URL!');
+                    setTimeout(() => setInviteToast(null), 3200);
+                  }}
+                  style={{ backgroundColor: primaryColor }}
+                  className="px-3.5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer hover:brightness-110 active:scale-95 transition-all shrink-0"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload URL</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md flex items-center justify-center gap-2.5 pb-4"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setIsModalFullAvatarOpen(false);
+                userAvatarInputRef.current?.click();
+              }}
+              style={{ backgroundColor: primaryColor }}
+              className="flex-1 py-3 px-4 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer hover:brightness-110 active:scale-95 transition-all"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Change Profile Avatar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const inputEl = document.getElementById('modal-full-avatar-url-input');
+                inputEl?.focus();
+              }}
+              className="py-3 px-4 rounded-2xl bg-purple-600/80 hover:bg-purple-600 border border-purple-400/40 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-95 transition-all"
+            >
+              <Link2 className="w-4 h-4" />
+              <span>Upload via URL</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsModalFullAvatarOpen(false)}
+              className="py-3 px-4 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs cursor-pointer transition-all"
+            >
+              Done
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

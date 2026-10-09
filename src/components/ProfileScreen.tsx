@@ -48,6 +48,7 @@ import {
   Radio,
   Video,
   BatteryCharging,
+  Link2,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { AVAILABLE_LANGUAGES, INITIAL_CONTACTS } from '../data/mockData';
@@ -408,6 +409,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [isEditingInlineBio, setIsEditingInlineBio] = useState(false);
   const [isEditingInlinePhone, setIsEditingInlinePhone] = useState(false);
   const [isFullAvatarViewerOpen, setIsFullAvatarViewerOpen] = useState(false);
+  const [avatarUrlInput, setAvatarUrlInput] = useState('');
+  const [showAvatarUrlBoxInModal, setShowAvatarUrlBoxInModal] = useState(true);
+  const [showInlineAvatarUrlBox, setShowInlineAvatarUrlBox] = useState(false);
   const [hidePhoneNumberPublic, setHidePhoneNumberPublic] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(
@@ -454,14 +458,64 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     const syncFingerprint = () => {
       setFingerprintRecord(getFingerprintRecord(currentUser.id));
     };
+    const handleGallerySetAvatar = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.avatarUrl) {
+        const uid = currentUser.id || 'user_abdullah';
+        saveUserAvatarLocally(uid, detail.avatarUrl, detail.title || 'Gallery Avatar', 0, detail.avatarUrl);
+        setProfileThumbnailUrl(detail.avatarUrl);
+        const updatedUser: UserProfile = {
+          ...currentUser,
+          avatar: detail.avatarUrl,
+          avatarThumbnailUrl: detail.avatarUrl,
+          avatarFileName: detail.title || 'Gallery Avatar',
+          avatarUpdatedAt: new Date().toISOString(),
+        };
+        onUpdateCurrentUser(updatedUser);
+        saveUserProfileToDb({
+          id: uid,
+          name: updatedUser.name,
+          avatar: detail.avatarUrl,
+          avatarThumbnailUrl: detail.avatarUrl,
+        }).catch(() => {});
+        setUploadStatusMsg(`✅ Set "${detail.title || 'Gallery Picture'}" as your Profile Avatar!`);
+        setTimeout(() => setUploadStatusMsg(null), 3200);
+      }
+    };
+    const handleGallerySetCover = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.coverUrl) {
+        const uid = currentUser.id || 'user_abdullah';
+        setProfileCoverUrl(detail.coverUrl);
+        setProfileCoverThumbnailUrl(detail.coverUrl);
+        const updatedUser: UserProfile = {
+          ...currentUser,
+          profileCoverUrl: detail.coverUrl,
+          profileCoverThumbnailUrl: detail.coverUrl,
+        };
+        onUpdateCurrentUser(updatedUser);
+        saveUserProfileToDb({
+          id: uid,
+          name: updatedUser.name,
+          avatar: updatedUser.avatar,
+          profileCoverUrl: detail.coverUrl,
+        }).catch(() => {});
+        setUploadStatusMsg(`🖼️ Set gallery picture as your Profile Cover!`);
+        setTimeout(() => setUploadStatusMsg(null), 3200);
+      }
+    };
     const unsubAutoPlay = subscribeAutoPlayChatVideosSetting((enabled) => {
       setAutoPlayChatVideos(enabled);
     });
     window.addEventListener('freedom-media-moderation-updated', syncAdultSetting);
+    window.addEventListener('freedom-gallery-set-avatar', handleGallerySetAvatar);
+    window.addEventListener('freedom-gallery-set-cover', handleGallerySetCover);
     window.addEventListener('freedom-fingerprint-updated', syncFingerprint);
     return () => {
       unsubAutoPlay();
       window.removeEventListener('freedom-media-moderation-updated', syncAdultSetting);
+      window.removeEventListener('freedom-gallery-set-avatar', handleGallerySetAvatar);
+      window.removeEventListener('freedom-gallery-set-cover', handleGallerySetCover);
       window.removeEventListener('freedom-fingerprint-updated', syncFingerprint);
     };
   }, [currentUser.id]);
@@ -845,6 +899,58 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
     // reset input so the same file can be re-selected if needed
     e.target.value = '';
+  };
+
+  // Second Option: Upload / Set User Profile Avatar via Image URL
+  const handleApplyAvatarFromUrl = async (rawUrl?: string) => {
+    const cleanInput = (rawUrl !== undefined ? rawUrl : avatarUrlInput).trim();
+    if (!cleanInput) {
+      setUploadStatusMsg('Please enter a valid image URL (https://... or data:image/...).');
+      setTimeout(() => setUploadStatusMsg(null), 3000);
+      return;
+    }
+    const formattedUrl =
+      /^https?:\/\//i.test(cleanInput) || cleanInput.startsWith('data:image/')
+        ? cleanInput
+        : `https://${cleanInput}`;
+
+    try {
+      setIsUploading(true);
+      const uid = currentUser.id || 'user_abdullah';
+      saveUserAvatarLocally(uid, formattedUrl, 'URL Profile Avatar', 0, formattedUrl);
+      try {
+        localStorage.setItem(`freedom_profile_thumbnail_${uid}`, formattedUrl);
+        localStorage.setItem('freedom_active_user_thumbnail_v1', formattedUrl);
+        localStorage.setItem('freedom_active_user_avatar_v1', formattedUrl);
+      } catch {}
+      setProfileThumbnailUrl(formattedUrl);
+
+      const updatedUser: UserProfile = {
+        ...currentUser,
+        avatar: formattedUrl,
+        avatarThumbnailUrl: formattedUrl,
+        avatarFileName: 'URL Profile Avatar',
+        avatarUpdatedAt: new Date().toISOString(),
+      };
+      onUpdateCurrentUser(updatedUser);
+
+      try {
+        await saveUserProfileToDb({
+          id: uid,
+          name: updatedUser.name,
+          avatar: formattedUrl,
+          avatarThumbnailUrl: formattedUrl,
+          avatarFileName: 'URL Profile Avatar',
+        });
+      } catch {}
+
+      setAvatarUrlInput('');
+      setShowInlineAvatarUrlBox(false);
+      setUploadStatusMsg('✅ Profile Avatar uploaded & saved via URL!');
+      setTimeout(() => setUploadStatusMsg(null), 3500);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1612,6 +1718,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       </button>
 
                       <button
+                        id="profile-toggle-url-avatar-btn"
+                        type="button"
+                        onClick={() => setShowInlineAvatarUrlBox((prev) => !prev)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition-all ${
+                          showInlineAvatarUrlBox
+                            ? 'bg-purple-500/20 border-purple-500 text-purple-400'
+                            : isDark
+                            ? 'bg-slate-800 border-slate-700 text-purple-300 hover:bg-slate-700'
+                            : 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100'
+                        }`}
+                        title="Option 2: Upload User Avatar via Image URL"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Avatar URL</span>
+                      </button>
+
+                      <button
                         type="button"
                         onClick={() => setIsFullAvatarViewerOpen(true)}
                         className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition-all ${
@@ -1675,6 +1798,58 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         />
                       </label>
                     </div>
+
+                    {/* Inline Second Option: Upload User Avatar by Image URL */}
+                    {showInlineAvatarUrlBox && (
+                      <div
+                        className={`p-3 rounded-2xl border space-y-2 animate-in fade-in duration-150 ${
+                          isDark
+                            ? 'bg-slate-900/90 border-purple-500/40'
+                            : 'bg-purple-50/70 border-purple-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-extrabold flex items-center gap-1.5 text-purple-400">
+                            <Link2 className="w-3.5 h-3.5" />
+                            <span>Option 2: Upload User Avatar via Image URL</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowInlineAvatarUrlBox(false)}
+                            className="text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="profile-inline-avatar-url-input"
+                            type="url"
+                            value={avatarUrlInput}
+                            onChange={(e) => setAvatarUrlInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleApplyAvatarFromUrl();
+                            }}
+                            placeholder="https://example.com/your-avatar.jpg"
+                            className={`flex-1 px-3 py-2 rounded-xl text-xs border outline-none ${
+                              isDark
+                                ? 'bg-slate-950 border-slate-700 text-white placeholder-slate-500 focus:border-purple-500'
+                                : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-purple-500'
+                            }`}
+                          />
+                          <button
+                            id="profile-inline-save-avatar-url-btn"
+                            type="button"
+                            onClick={() => handleApplyAvatarFromUrl()}
+                            style={{ backgroundColor: primaryColor }}
+                            className="px-3.5 py-2 rounded-xl text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer hover:brightness-110 active:scale-95 transition-all shrink-0 shadow-sm"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Upload URL</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                 <div className="space-y-2">
@@ -4042,40 +4217,109 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex-1 flex items-center justify-center w-full max-w-md py-4"
+            className="flex-1 flex flex-col items-center justify-center w-full max-w-md py-3 gap-3 overflow-y-auto"
           >
-            <div className="relative w-72 h-72 sm:w-80 sm:h-80 rounded-3xl overflow-hidden border-4 border-white/20 shadow-2xl bg-slate-900">
+            <div className="relative w-64 h-64 sm:w-76 sm:h-76 rounded-3xl overflow-hidden border-4 border-white/20 shadow-2xl bg-slate-900 shrink-0">
               <img
-                src={persistentUserAvatar}
+                src={
+                  avatarUrlInput.trim() &&
+                  (/^https?:\/\//i.test(avatarUrlInput.trim()) ||
+                    avatarUrlInput.trim().startsWith('data:image/'))
+                    ? avatarUrlInput.trim()
+                    : persistentUserAvatar
+                }
                 alt={currentUser.name}
                 className="w-full h-full object-cover"
               />
+            </div>
+
+            {/* Option 2: Upload User Avatar via URL inside Full Profile Avatar Modal */}
+            <div className="w-full bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                  <Link2 className="w-3.5 h-3.5 text-purple-300" />
+                  <span>Option 2: Upload User Avatar via URL</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarUrlBoxInModal((prev) => !prev)}
+                  className="text-[10px] font-bold text-purple-300 hover:text-white cursor-pointer"
+                >
+                  {showAvatarUrlBoxInModal ? 'Hide URL' : 'Enter URL'}
+                </button>
+              </div>
+
+              {showAvatarUrlBoxInModal && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="full-avatar-modal-url-input"
+                    type="url"
+                    value={avatarUrlInput}
+                    onChange={(e) => setAvatarUrlInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleApplyAvatarFromUrl();
+                      }
+                    }}
+                    placeholder="Paste image URL (https://...)"
+                    className="flex-1 px-3 py-2.5 rounded-xl bg-black/60 border border-white/20 text-white placeholder-slate-400 text-xs outline-none focus:border-purple-400"
+                  />
+                  <button
+                    id="full-avatar-modal-upload-url-btn"
+                    type="button"
+                    onClick={() => handleApplyAvatarFromUrl()}
+                    style={{ backgroundColor: primaryColor }}
+                    className="px-3.5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md cursor-pointer hover:brightness-110 active:scale-95 transition-all shrink-0"
+                    title="Upload and save user avatar from URL"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload URL</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md flex items-center justify-center gap-3 pb-4"
+            className="w-full max-w-md flex flex-col gap-2 pb-4"
           >
-            <button
-              type="button"
-              onClick={() => {
-                setIsFullAvatarViewerOpen(false);
-                fileInputRef.current?.click();
-              }}
-              style={{ backgroundColor: primaryColor }}
-              className="flex-1 py-3 px-4 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer hover:brightness-110 active:scale-95 transition-all"
-            >
-              <Camera className="w-4 h-4" />
-              <span>Change Profile Avatar</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsFullAvatarViewerOpen(false)}
-              className="py-3 px-5 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs cursor-pointer transition-all"
-            >
-              Done
-            </button>
+            <div className="flex items-center justify-center gap-2.5">
+              <button
+                id="full-avatar-modal-upload-file-btn"
+                type="button"
+                onClick={() => {
+                  setIsFullAvatarViewerOpen(false);
+                  fileInputRef.current?.click();
+                }}
+                style={{ backgroundColor: primaryColor }}
+                className="flex-1 py-3 px-4 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer hover:brightness-110 active:scale-95 transition-all"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Change Profile Avatar</span>
+              </button>
+              <button
+                id="full-avatar-modal-toggle-url-option-btn"
+                type="button"
+                onClick={() => {
+                  setShowAvatarUrlBoxInModal(true);
+                  const inputEl = document.getElementById('full-avatar-modal-url-input');
+                  inputEl?.focus();
+                }}
+                className="py-3 px-4 rounded-2xl bg-purple-600/80 hover:bg-purple-600 border border-purple-400/40 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-95 transition-all"
+                title="Upload user avatar using an image URL"
+              >
+                <Link2 className="w-4 h-4" />
+                <span>Upload via URL</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFullAvatarViewerOpen(false)}
+                className="py-3 px-4 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs cursor-pointer transition-all"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
