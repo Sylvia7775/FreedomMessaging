@@ -29,7 +29,10 @@ import {
   getCleanAvatar,
   getSavedAvatarRecord,
   saveUserAvatarLocally,
+  getPersistentUserThumbnail,
+  isUploadedRealAvatar,
 } from './lib/avatarHelper';
+import { StatusScreen } from './components/StatusScreen';
 import {
   detectVideoPlatformFromText,
   stripVideoUrlsFromText,
@@ -388,12 +391,19 @@ export default function App() {
         if (parsed && parsed.id && !isExampleUserRecord(parsed.id, parsed)) {
           const savedAvatarRec = getSavedAvatarRecord(parsed.id);
           const cleanName = parsed.name || 'WeedChat User';
-          const cleanAv = getCleanAvatar(
-            cleanName,
-            savedAvatarRec?.avatar || parsed.avatar,
-            '#7C3AED',
-            parsed.id
+          const cleanAv = getPersistentUserThumbnail(
+            {
+              id: parsed.id,
+              name: cleanName,
+              avatar: savedAvatarRec?.avatar || parsed.avatar,
+              avatarThumbnailUrl: savedAvatarRec?.avatarThumbnailUrl || parsed.avatarThumbnailUrl,
+            },
+            true
           );
+          const cleanThumb =
+            savedAvatarRec?.avatarThumbnailUrl ||
+            parsed.avatarThumbnailUrl ||
+            (isUploadedRealAvatar(cleanAv) ? cleanAv : undefined);
           return {
             ...parsed,
             name: cleanName,
@@ -402,6 +412,7 @@ export default function App() {
               ''
             ),
             avatar: cleanAv,
+            avatarThumbnailUrl: cleanThumb,
             avatarFileName: savedAvatarRec?.avatarFileName || parsed.avatarFileName,
             avatarFileSize: savedAvatarRec?.avatarFileSize || parsed.avatarFileSize,
             location: parsed.location || 'New York,NY',
@@ -426,10 +437,14 @@ export default function App() {
 
   // Automatically persist currentUser profile & avatar whenever updated
   const handleUpdateCurrentUserProfile = (updated: UserProfile) => {
-    const cleanAv = getCleanAvatar(updated.name || 'WeedChat User', updated.avatar, '#7C3AED', updated.id);
+    const cleanAv = getPersistentUserThumbnail(updated, true);
+    const cleanThumb =
+      updated.avatarThumbnailUrl ||
+      (isUploadedRealAvatar(cleanAv) ? cleanAv : currentUser.avatarThumbnailUrl);
     const normalized: UserProfile = {
       ...updated,
       avatar: cleanAv,
+      avatarThumbnailUrl: cleanThumb,
     };
     setCurrentUser(normalized);
     try {
@@ -439,16 +454,21 @@ export default function App() {
         normalized.id || 'usr_guest',
         cleanAv,
         normalized.avatarFileName,
-        normalized.avatarFileSize
+        normalized.avatarFileSize,
+        cleanThumb
       );
     } catch {}
+    // Also reflect current user's persistent thumbnail in outgoing chat messages ('me')
+    setMessages((prev) =>
+      prev.map((m) => (m.senderId === 'me' ? { ...m, senderAvatar: cleanThumb || cleanAv } : m))
+    );
     // Also reflect current user's avatar in group participants ('me')
     setContacts((prev) =>
       prev.map((c) => {
         if (c.isGroup || c.entityType === 'group') {
           const updatedParts = (c.participants || []).map((p) =>
             p.id === 'me' || p.id === normalized.id
-              ? { ...p, name: `${normalized.name} (Admin)`, avatar: cleanAv }
+              ? { ...p, name: `${normalized.name} (Admin)`, avatar: cleanThumb || cleanAv }
               : p
           );
           return { ...c, participants: updatedParts };
@@ -457,7 +477,8 @@ export default function App() {
           return {
             ...c,
             name: normalized.name,
-            avatar: cleanAv,
+            avatar: cleanThumb || cleanAv,
+            avatarThumbnailUrl: cleanThumb,
             email: normalized.email ?? c.email,
             phoneNumber: normalized.phoneNumber ?? c.phoneNumber,
             hidePhoneNumberPublic:
@@ -688,30 +709,50 @@ export default function App() {
       const customEv = e as CustomEvent<{
         userId: string;
         avatar: string;
+        avatarThumbnailUrl?: string;
         fileName?: string;
         fileSize?: string;
       }>;
       if (!customEv.detail) return;
-      const { userId, avatar, fileName, fileSize } = customEv.detail;
+      const { userId, avatar, avatarThumbnailUrl, fileName, fileSize } = customEv.detail;
 
       if (
         userId === currentUser.id ||
+        userId === 'admin_mobilephonesky' ||
         userId === 'user_abdullah' ||
         userId === 'current_user' ||
         userId === 'me'
       ) {
         setCurrentUser((prev) => {
+          const bestAvatar =
+            (isUploadedRealAvatar(avatar) ? avatar : '') ||
+            (isUploadedRealAvatar(avatarThumbnailUrl) ? avatarThumbnailUrl! : '') ||
+            prev.avatar ||
+            avatar;
+          const bestThumb =
+            (isUploadedRealAvatar(avatarThumbnailUrl) ? avatarThumbnailUrl : undefined) ||
+            (isUploadedRealAvatar(avatar) ? avatar : undefined) ||
+            prev.avatarThumbnailUrl;
           const next = {
             ...prev,
-            avatar,
+            avatar: bestAvatar,
+            avatarThumbnailUrl: bestThumb,
             avatarFileName: fileName || prev.avatarFileName,
             avatarFileSize: fileSize || prev.avatarFileSize,
           };
           try {
             localStorage.setItem('freedom_current_user_profile', JSON.stringify(next));
+            localStorage.setItem('freedom_active_user_session_v4', JSON.stringify(next));
           } catch {}
           return next;
         });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.senderId === 'me'
+              ? { ...m, senderAvatar: avatarThumbnailUrl || avatar || m.senderAvatar }
+              : m
+          )
+        );
       }
 
       setContacts((prev) =>
@@ -1082,17 +1123,28 @@ export default function App() {
                 }
                 const savedAv = getSavedAvatarRecord(activeUserId);
                 const cleanName = profile.name || prev.name || 'WeedChat User';
-                const resolvedAv = getCleanAvatar(
-                  cleanName,
-                  savedAv?.avatar || profile.avatar || prev.avatar,
-                  '#7C3AED',
-                  activeUserId
+                const resolvedAv = getPersistentUserThumbnail(
+                  {
+                    id: activeUserId,
+                    name: cleanName,
+                    avatar: savedAv?.avatar || prev.avatar || profile.avatar,
+                    avatarThumbnailUrl:
+                      savedAv?.avatarThumbnailUrl ||
+                      prev.avatarThumbnailUrl ||
+                      profile.avatarThumbnailUrl,
+                  },
+                  true
                 );
                 return {
                   ...prev,
                   ...profile,
                   name: cleanName,
                   avatar: resolvedAv,
+                  avatarThumbnailUrl:
+                    savedAv?.avatarThumbnailUrl ||
+                    prev.avatarThumbnailUrl ||
+                    profile.avatarThumbnailUrl ||
+                    (isUploadedRealAvatar(resolvedAv) ? resolvedAv : undefined),
                 };
               });
             }
@@ -2281,12 +2333,36 @@ export default function App() {
             onOpenQrScanner={() => setIsQrScannerOpen(true)}
             primaryColor={brandConfig.primaryColor}
             isAdminVerified={isAdminVerified}
-            userAvatar={currentUser?.avatar}
+            userAvatar={getPersistentUserThumbnail(currentUser, true)}
             onArchiveChat={handleArchiveChat}
             onDeleteChat={handleDeleteChat}
             onRestoreChat={handleRestoreChat}
             onPinChat={handlePinChat}
             onToggleReadChat={handleToggleReadChat}
+          />
+        );
+      case 'status':
+        return (
+          <StatusScreen
+            currentUser={currentUser}
+            contacts={contacts}
+            onNavigate={handleNavigateScreen}
+            onReplyToStatus={(targetContact, statusItem, replyText) => {
+              handleSelectChat(targetContact);
+              setTimeout(() => {
+                handleSendMessage(
+                  `[Status Reply: "${
+                    statusItem.type === 'text'
+                      ? (statusItem.text || '').slice(0, 36)
+                      : statusItem.caption || 'Photo/Video Status'
+                  }"] ${replyText}`,
+                  'text'
+                );
+              }, 100);
+            }}
+            theme={theme}
+            primaryColor={brandConfig.primaryColor}
+            isAdminVerified={isAdminVerified}
           />
         );
       case 'chat_detail':

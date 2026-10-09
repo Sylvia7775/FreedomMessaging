@@ -104,7 +104,7 @@ import {
   saveContactOrChannelToDb,
   ChannelLiveStreamRecord,
 } from '../lib/firebase';
-import { getCleanAvatar } from '../lib/avatarHelper';
+import { getCleanAvatar, getPersistentUserThumbnail } from '../lib/avatarHelper';
 import {
   VerifiedCheckmarkBadge,
   isAccountProfileValidated,
@@ -1663,7 +1663,7 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
             >
               <div className="relative shrink-0">
                 <img
-                  src={contact.avatar}
+                  src={getPersistentUserThumbnail(contact, false)}
                   alt={contact.name}
                   className="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow-sm"
                 />
@@ -2657,7 +2657,14 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                     title={`Visit ${msg.senderName || contact.name}'s profile & media gallery`}
                   >
                     <img
-                      src={msg.senderAvatar || contact.avatar}
+                      src={getPersistentUserThumbnail(
+                        {
+                          id: msg.senderParticipantId || contact.id,
+                          name: msg.senderName || contact.name,
+                          avatar: msg.senderAvatar || contact.avatar,
+                        },
+                        false
+                      )}
                       alt={msg.senderName || contact.name}
                       className="w-7 h-7 rounded-full object-cover border border-slate-700 hover:border-emerald-400 shadow-xs"
                     />
@@ -3867,6 +3874,27 @@ export const ActiveChatScreen: React.FC<ActiveChatScreenProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Current User Persistent Profile Thumbnail Avatar on Outgoing Messages */}
+                {isMe && (
+                  <div
+                    onClick={() => onNavigate('profile')}
+                    className="shrink-0 mb-1 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+                    title="Your Persistent Profile Thumbnail • Tap to view Profile"
+                  >
+                    <img
+                      src={getPersistentUserThumbnail(
+                        {
+                          name: msg.senderName || 'You',
+                          avatar: msg.senderAvatar,
+                        },
+                        true
+                      )}
+                      alt={msg.senderName || 'You'}
+                      className="w-7 h-7 rounded-full object-cover border border-emerald-500/60 shadow-xs"
+                    />
+                  </div>
+                )}
               </div>
               </React.Fragment>
             );

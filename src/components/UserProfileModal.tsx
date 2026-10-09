@@ -1322,6 +1322,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             : 'bg-white text-slate-900 border-slate-200'
         }`}
       >
+        {/* Scrollable Container wrapping Cover Banner + Profile Card Body so Avatar is NEVER clipped on Mobile */}
+        <div
+          style={{ WebkitOverflowScrolling: 'touch' }}
+          className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y scroll-smooth flex flex-col"
+        >
         {/* Top Header Banner / Group Cover / User Profile Cover */}
         <div
           style={{ backgroundColor: primaryColor }}
@@ -1411,15 +1416,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </button>
             </div>
           ) : (
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 flex-wrap">
+            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 flex-wrap pr-12">
               <button
                 id="upload-user-profile-cover-btn"
                 type="button"
                 onClick={() => userCoverInputRef.current?.click()}
-                className="px-2.5 py-1 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md text-white text-[10px] font-extrabold border border-white/20 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
                 title="Upload User Profile Cover Picture"
               >
-                <Camera className="w-3 h-3 text-purple-300" />
+                <Camera className="w-3.5 h-3.5 text-purple-300" />
                 <span>Upload Profile Cover</span>
               </button>
 
@@ -1427,10 +1432,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 id="customize-user-profile-wallpaper-btn"
                 type="button"
                 onClick={() => setShowCustomizeDrawer((prev) => !prev)}
-                className="px-2.5 py-1 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md text-white text-[10px] font-extrabold border border-white/20 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-extrabold border border-white/15 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
                 title="Customize User Profile Cover & Page Wallpaper"
               >
-                <ImageIcon className="w-3 h-3 text-emerald-400" />
+                <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Profile Wallpaper</span>
               </button>
 
@@ -1438,10 +1443,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 id="direct-upload-user-wallpaper-btn"
                 type="button"
                 onClick={() => userWallpaperInputRef.current?.click()}
-                className="px-2.5 py-1 rounded-full bg-emerald-600/85 hover:bg-emerald-500 backdrop-blur-md text-white text-[10px] font-extrabold border border-emerald-300/30 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-full bg-emerald-600/90 hover:bg-emerald-500 backdrop-blur-md text-white text-[11px] font-extrabold border border-emerald-300/30 flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
                 title="Upload User Wallpaper"
               >
-                <Upload className="w-3 h-3 text-white" />
+                <Upload className="w-3.5 h-3.5 text-white" />
                 <span>Upload Wallpaper</span>
               </button>
             </div>
@@ -1474,7 +1479,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             id="close-user-profile-modal-btn"
             type="button"
             onClick={onClose}
-            className="absolute top-3 right-3 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition-colors cursor-pointer z-10"
+            className="absolute top-3 right-3 p-2 rounded-full bg-black/45 hover:bg-black/65 text-white backdrop-blur-md transition-colors cursor-pointer z-10"
             title="Close Profile"
           >
             <X className="w-5 h-5" />
@@ -1482,70 +1487,109 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         {/* Profile Card Body */}
-        <div className="flex-1 overflow-y-auto px-5 sm:px-7 pt-3 pb-6 space-y-5">
-          {/* Avatar and Main Info Header */}
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-            <div className="flex items-start gap-3.5">
-              <div className="relative shrink-0 group -mt-14 z-10">
-                <img
-                  src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
-                  alt={contact.name}
-                  style={{ borderColor: primaryColor, width: '100px', height: '100px' }}
-                  className="w-[100px] h-[100px] rounded-full object-cover border-4 shadow-xl bg-slate-800"
-                />
-                <button
-                  id="modal-upload-avatar-camera-btn"
-                  type="button"
-                  onClick={() => userAvatarInputRef.current?.click()}
-                  style={{ backgroundColor: primaryColor }}
-                  className="absolute bottom-1 right-1 w-8 h-8 rounded-full border-2 border-[#12161F] text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                  title="Upload & Auto-Save Avatar Photo"
-                >
-                  <Camera className="w-4 h-4" />
-                </button>
-              </div>
+        <div className="px-4 sm:px-7 pt-2 pb-6 space-y-5">
+          {/* Avatar and Main Info Header — Matching User Profile Screenshot Style */}
+          {!isGroup && !isChannel ? (
+            <div className="space-y-3.5">
+              {/* Avatar Overlapping Cover Banner (Left) + Location & Verified Badge Row Below Cover (Right) */}
+              <div className="flex items-start gap-3.5">
+                <div className="relative shrink-0 group -mt-12 sm:-mt-14 z-10">
+                  <img
+                    src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
+                    alt={contact.name}
+                    style={{ borderColor: primaryColor }}
+                    className="w-26 h-26 sm:w-30 sm:h-30 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F]"
+                  />
+                  <button
+                    id="modal-upload-avatar-camera-btn"
+                    type="button"
+                    onClick={() => userAvatarInputRef.current?.click()}
+                    style={{ backgroundColor: primaryColor }}
+                    className="absolute bottom-0.5 right-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-white dark:border-[#12161F] text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                    title="Upload & Auto-Save Avatar Photo"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+                </div>
 
-              <div className="mb-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight flex items-center gap-1.5">
-                    <span>{contact.name}</span>
-                  </h2>
-                  {isGroup ? (
-                    <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <Users className="w-3 h-3" />
-                      <span>Group ({groupParticipants.length} Members)</span>
-                    </span>
-                  ) : isChannel ? (
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <Megaphone className="w-3 h-3" />
-                      <span>Channel ({channelSubscribersCount} Subscribers)</span>
-                    </span>
-                  ) : (
-                    friendInviteStatus === 'accepted' && (
+                <div className="flex-1 min-w-0 pt-0.5 space-y-1">
+                  {/* Location + Verified Seal Badge Row Immediately Below Cover */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!isEditingModalLocation ? (
+                      <button
+                        id="user-profile-location-display"
+                        type="button"
+                        onClick={() => {
+                          setModalLocationDraft(userLocation);
+                          setIsEditingModalLocation(true);
+                        }}
+                        className={`text-sm font-semibold tracking-tight flex items-center gap-1.5 hover:opacity-80 cursor-pointer transition-opacity ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                        title="Click to edit user location"
+                      >
+                        <span>{userLocation || 'New York,NY'}</span>
+                        <Edit2 className="w-3.5 h-3.5 text-slate-400 opacity-75" />
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <input
+                          id="user-profile-location-edit-input"
+                          type="text"
+                          value={modalLocationDraft}
+                          onChange={(e) => setModalLocationDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveModalLocation();
+                            if (e.key === 'Escape') setIsEditingModalLocation(false);
+                          }}
+                          placeholder="e.g. Dubai, UAE"
+                          className={`px-2 py-0.5 rounded-lg text-xs border outline-none w-32 ${
+                            isDark
+                              ? 'bg-slate-800 border-slate-700 text-white'
+                              : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        />
+                        <button
+                          id="user-profile-location-save-btn"
+                          type="button"
+                          onClick={handleSaveModalLocation}
+                          style={{ backgroundColor: primaryColor }}
+                          className="p-1 rounded-md text-white cursor-pointer"
+                          title="Save location"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+
+                    {isAccountProfileValidated(contact) && (
+                      <VerifiedCheckmarkBadge
+                        id="profile-modal-verified-badge"
+                        variant="profile_seal"
+                        title={`${contact.name} • Verified Profile`}
+                      />
+                    )}
+
+                    {friendInviteStatus === 'accepted' && (
                       <span className="text-[10px] bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                         <UserCheck className="w-3 h-3" />
                         <span>Friends</span>
                       </span>
-                    )
-                  )}
-                  {isGroup && hasJoinedGroup && (
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <Check className="w-3 h-3 stroke-[2.5]" />
-                      <span>Joined</span>
-                    </span>
-                  )}
-                  {isBlocked && (
-                    <span className="text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-full font-bold uppercase">
-                      Blocked
-                    </span>
-                  )}
-                </div>
-                {isGroup ? (
-                  <p style={{ color: primaryColor }} className="text-xs font-mono font-semibold">
-                    {(contact as UserContact).groupTopic || 'Multilingual Group Page'}
-                  </p>
-                ) : (
-                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    )}
+                    {isBlocked && (
+                      <span className="text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-full font-bold uppercase">
+                        Blocked
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Full Name */}
+                  <h2 className="text-lg sm:text-xl font-extrabold tracking-tight truncate">
+                    {contact.name}
+                  </h2>
+
+                  {/* @username with Edit Pencil */}
+                  <div className="flex items-center gap-2 flex-wrap">
                     {!isEditingModalUsername ? (
                       <button
                         id="user-profile-username-display-btn"
@@ -1555,11 +1599,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           setIsEditingModalUsername(true);
                         }}
                         style={{ color: primaryColor }}
-                        className="text-xs font-mono font-bold flex items-center gap-1 hover:opacity-80 cursor-pointer"
+                        className="text-xs sm:text-sm font-mono font-bold flex items-center gap-1.5 hover:opacity-80 cursor-pointer"
                         title="Click to edit @username"
                       >
-                        <span>@{username}</span>
-                        <Edit2 className="w-3 h-3 opacity-75" />
+                        <span className="truncate">@{username}</span>
+                        <Edit2 className="w-3.5 h-3.5 opacity-80 shrink-0" />
                       </button>
                     ) : (
                       <div className="flex items-center gap-1">
@@ -1608,108 +1652,187 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         </button>
                       </div>
                     )}
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-400 font-semibold">
+                  </div>
+
+                  {/* Gender • Age Badge & Online Status */}
+                  <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                    <span className="inline-block text-[11px] px-2.5 py-0.5 rounded-full bg-slate-500/15 text-slate-500 dark:text-slate-300 font-semibold">
                       {userGender} • {userAge} yrs
                     </span>
+                    <span className="text-xs text-slate-400 flex items-center gap-1.5 leading-snug">
+                      <span
+                        style={{ backgroundColor: primaryColor }}
+                        className="w-2 h-2 rounded-full shrink-0"
+                      />
+                      <span>{statusText}</span>
+                    </span>
                   </div>
-                )}
-                <div className="mt-1 flex items-center justify-between gap-4 flex-wrap">
-                  <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <span style={{ backgroundColor: primaryColor }} className="w-1.5 h-1.5 rounded-full" />
-                    <span>{statusText}</span>
-                  </p>
-                  {!isGroup && (
-                    <div className="flex items-center gap-2">
-                      {!isEditingModalLocation ? (
-                        <button
-                          id="user-profile-location-display"
-                          type="button"
-                          onClick={() => {
-                            setModalLocationDraft(userLocation);
-                            setIsEditingModalLocation(true);
-                          }}
-                          className={`text-xs sm:text-sm font-medium tracking-tight flex items-center gap-1 hover:opacity-80 cursor-pointer transition-opacity ${
-                            isDark ? 'text-slate-100' : 'text-slate-900'
-                          }`}
-                          title="Click to edit user location"
-                        >
-                          <span>{userLocation || 'New York,NY'}</span>
-                          <Edit2 className="w-3 h-3 text-slate-400 opacity-70" />
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <input
-                            id="user-profile-location-edit-input"
-                            type="text"
-                            value={modalLocationDraft}
-                            onChange={(e) => setModalLocationDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveModalLocation();
-                              if (e.key === 'Escape') setIsEditingModalLocation(false);
-                            }}
-                            placeholder="e.g. New York,NY"
-                            className={`px-2 py-0.5 rounded-lg text-xs border outline-none w-32 ${
-                              isDark
-                                ? 'bg-slate-800 border-slate-700 text-white'
-                                : 'bg-white border-slate-300 text-slate-900'
-                            }`}
-                          />
-                          <button
-                            id="user-profile-location-save-btn"
-                            type="button"
-                            onClick={handleSaveModalLocation}
-                            style={{ backgroundColor: primaryColor }}
-                            className="p-1 rounded-md text-white cursor-pointer"
-                            title="Save location"
-                          >
-                            <Check className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                      {isAccountProfileValidated(contact) && (
-                        <VerifiedCheckmarkBadge
-                          id="profile-modal-verified-badge"
-                          variant="profile_seal"
-                          title={`${contact.name} • Verified Profile`}
-                        />
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
-            </div>
 
-            {/* Action Area: On Group Page, show "Join Group" / "Leave the group"; on Channel Page, show "Subscribe to channel" */}
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
-              {isGroup ? (
-                <>
-                  {hasJoinedGroup ? (
-                    <button
-                      id="group-page-leave-group-btn"
-                      type="button"
-                      onClick={handleLeaveGroupClick}
-                      className="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
-                      title="Leave the group"
-                    >
-                      <LogOut className="w-4 h-4 stroke-[2.5]" />
-                      <span>Leave the group</span>
-                    </button>
-                  ) : (
-                    <button
-                      id="group-page-join-group-btn"
-                      type="button"
-                      onClick={handleJoinGroupClick}
-                      style={{ backgroundColor: primaryColor }}
-                      className="px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-                      title="Join the group"
-                    >
-                      <Users className="w-4 h-4" />
-                      <span>Join Group</span>
-                    </button>
-                  )}
-                </>
-              ) : isChannel ? (
-                <>
+              {/* Action Buttons Row Below Avatar (Message Circle, Call Circle, Send Friend Invite Pill) */}
+              <div className="flex items-center gap-2.5 flex-wrap pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    if (onSendMessage) {
+                      onSendMessage();
+                    }
+                  }}
+                  style={{ backgroundColor: primaryColor }}
+                  className="w-11 h-11 rounded-full hover:brightness-110 active:scale-95 text-white flex items-center justify-center shadow-md transition-all cursor-pointer"
+                  title="Send Message"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                </button>
+
+                {onStartCall && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onStartCall('voice');
+                    }}
+                    className={`w-11 h-11 rounded-full border transition-all cursor-pointer active:scale-95 flex items-center justify-center shadow-2xs ${
+                      isDark
+                        ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-white'
+                        : 'bg-slate-100/80 hover:bg-slate-200 border-slate-300 text-slate-800'
+                    }`}
+                    title="Start Voice Call"
+                  >
+                    <Phone style={{ color: primaryColor }} className="w-5 h-5" />
+                  </button>
+                )}
+
+                {friendInviteStatus === 'accepted' && (
+                  <button
+                    id="profile-open-friendship-link-btn"
+                    type="button"
+                    onClick={() => {
+                      if (onOpenFriendshipModal) {
+                        onOpenFriendshipModal();
+                      } else {
+                        setIsInternalFriendshipOpen(true);
+                      }
+                    }}
+                    className={`w-11 h-11 rounded-full border transition-all cursor-pointer active:scale-95 flex items-center justify-center ${
+                      isDark
+                        ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-emerald-400'
+                        : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-emerald-600'
+                    }`}
+                  >
+                    <Handshake className="w-5 h-5" />
+                  </button>
+                )}
+
+                {friendInviteStatus === 'none' && (
+                  <button
+                    id="profile-send-friend-invite-btn"
+                    type="button"
+                    onClick={handleSendFriendInvite}
+                    style={{ backgroundColor: primaryColor }}
+                    className="px-5 py-2.5 rounded-full text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Send Friend Invite</span>
+                  </button>
+                )}
+
+                {friendInviteStatus === 'pending' && (
+                  <span className="px-4 py-2.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                    <Clock className="w-4 h-4" />
+                    <span>Invite Sent</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex flex-col items-center text-center sm:flex-row sm:items-start sm:text-left gap-3.5 w-full sm:w-auto">
+                <div className="relative shrink-0 group -mt-14 sm:-mt-12 z-10">
+                  <img
+                    src={customContactAvatar || getCleanAvatar(contact.avatar, contact.name, contact.id)}
+                    alt={contact.name}
+                    style={{ borderColor: primaryColor }}
+                    className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover border-4 shadow-xl bg-slate-800 ring-4 ring-white dark:ring-[#12161F]"
+                  />
+                  <button
+                    id="modal-upload-avatar-camera-btn"
+                    type="button"
+                    onClick={() => userAvatarInputRef.current?.click()}
+                    style={{ backgroundColor: primaryColor }}
+                    className="absolute bottom-1 right-1 w-8 h-8 rounded-full border-2 border-white dark:border-[#12161F] text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                    title="Upload & Auto-Save Avatar Photo"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="mb-1 sm:pt-2 flex flex-col items-center sm:items-start">
+                  <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                    <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight flex items-center gap-1.5">
+                      <span>{contact.name}</span>
+                    </h2>
+                    {isGroup ? (
+                      <span className="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        <span>Group ({groupParticipants.length} Members)</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Megaphone className="w-3 h-3" />
+                        <span>Channel ({channelSubscribersCount} Subscribers)</span>
+                      </span>
+                    )}
+                    {isGroup && hasJoinedGroup && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Check className="w-3 h-3 stroke-[2.5]" />
+                        <span>Joined</span>
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ color: primaryColor }} className="text-xs font-mono font-semibold">
+                    {(contact as UserContact).groupTopic || 'Multilingual Group Page'}
+                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-4 flex-wrap">
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <span style={{ backgroundColor: primaryColor }} className="w-1.5 h-1.5 rounded-full" />
+                      <span>{statusText}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {isGroup ? (
+                  <>
+                    {hasJoinedGroup ? (
+                      <button
+                        id="group-page-leave-group-btn"
+                        type="button"
+                        onClick={handleLeaveGroupClick}
+                        className="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                        title="Leave the group"
+                      >
+                        <LogOut className="w-4 h-4 stroke-[2.5]" />
+                        <span>Leave the group</span>
+                      </button>
+                    ) : (
+                      <button
+                        id="group-page-join-group-btn"
+                        type="button"
+                        onClick={handleJoinGroupClick}
+                        style={{ backgroundColor: primaryColor }}
+                        className="px-4 py-2.5 rounded-2xl text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                        title="Join the group"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>Join Group</span>
+                      </button>
+                    )}
+                  </>
+                ) : (
                   <button
                     id="channel-page-subscribe-btn"
                     type="button"
@@ -1734,86 +1857,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       </>
                     )}
                   </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      if (onSendMessage) {
-                        onSendMessage();
-                      }
-                    }}
-                    style={{ backgroundColor: primaryColor }}
-                    className="p-2.5 rounded-2xl hover:brightness-110 active:scale-95 text-white flex items-center justify-center shadow-sm transition-all cursor-pointer"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                  </button>
-
-                  {onStartCall && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onStartCall('voice');
-                      }}
-                      className={`p-2.5 rounded-2xl border transition-all cursor-pointer active:scale-95 flex items-center justify-center ${
-                        isDark
-                          ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-white'
-                          : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
-                      }`}
-                    >
-                      <Phone style={{ color: primaryColor }} className="w-4 h-4" />
-                    </button>
-                  )}
-
-                  {/* Only show Friendship icon (without title) if users are friends */}
-                  {friendInviteStatus === 'accepted' && (
-                    <button
-                      id="profile-open-friendship-link-btn"
-                      type="button"
-                      onClick={() => {
-                        if (onOpenFriendshipModal) {
-                          onOpenFriendshipModal();
-                        } else {
-                          setIsInternalFriendshipOpen(true);
-                        }
-                      }}
-                      className={`p-2.5 rounded-2xl border transition-all cursor-pointer active:scale-95 flex items-center justify-center ${
-                        isDark
-                          ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-emerald-400'
-                          : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-emerald-600'
-                      }`}
-                    >
-                      <Handshake className="w-4 h-4" />
-                    </button>
-                  )}
-
-                  {/* Send "Friend Invite" button when not friends yet (Individual users only, NEVER on Group Page) */}
-                  {friendInviteStatus === 'none' && (
-                    <button
-                      id="profile-send-friend-invite-btn"
-                      type="button"
-                      onClick={handleSendFriendInvite}
-                      style={{ backgroundColor: primaryColor }}
-                      className="px-3.5 py-2.5 rounded-2xl text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>Send Friend Invite</span>
-                    </button>
-                  )}
-
-                  {friendInviteStatus === 'pending' && (
-                    <span className="px-3 py-2 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>Invite Sent</span>
-                    </span>
-                  )}
-                </>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Toast Feedback */}
           {inviteToast && (
@@ -2186,171 +2233,66 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* Pending Invitation Visibility & Accept Section (Individual Invited User Only — hidden on Group Page & Channel Page) */}
+          {/* Friends Suggest Invitation Section (Individual User Only — hidden on Group Page & Channel Page) */}
           {!isGroup && !isChannel && friendInviteStatus === 'pending' && (
             <div
               className={`p-4 rounded-2xl border space-y-2.5 ${
                 isDark ? 'bg-[#181D27] border-slate-800' : 'bg-slate-50 border-slate-200'
               }`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-emerald-400" />
-                  <span>Invitation Visibility & Access Role:</span>
+                  <UserPlus style={{ color: primaryColor }} className="w-3.5 h-3.5" />
+                  <span>Friends Suggest</span>
                 </span>
-                <div className="flex items-center gap-1 flex-wrap">
+              </div>
+
+              <div
+                className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                  isDark
+                    ? 'bg-slate-900/90 border-emerald-500/30'
+                    : 'bg-white border-emerald-500/30 shadow-xs'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={contact.avatar}
+                    alt={contact.name}
+                    className="w-9 h-9 rounded-full object-cover border border-emerald-500 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold truncate">
+                      Friend Invitation for {contact.name}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Accept or decline this friend invitation
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
                   <button
-                    id="role-switch-sender-btn"
+                    id="profile-accept-friend-invite-btn"
                     type="button"
-                    onClick={() => setViewerRole('sender')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      viewerRole === 'sender'
-                        ? 'bg-purple-600 text-white shadow-2xs'
-                        : isDark
-                        ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                        : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                    }`}
+                    onClick={() => updateInviteStatus('accepted', `Connected with ${contact.name}! 🎉`)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                   >
-                    You (Sender)
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Accept Friend Invite</span>
                   </button>
                   <button
-                    id="role-switch-invited-user-btn"
                     type="button"
-                    onClick={() => setViewerRole('invited_user')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      viewerRole === 'invited_user'
-                        ? 'bg-emerald-600 text-white shadow-2xs'
-                        : isDark
-                        ? 'bg-slate-800 text-emerald-400 hover:bg-slate-700 border border-emerald-500/30'
-                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300'
+                    onClick={() => updateInviteStatus('none', 'Friend invite declined.')}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
+                      isDark
+                        ? 'border-slate-700 text-slate-400 hover:bg-slate-800'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-100'
                     }`}
                   >
-                    <Bell className="w-2.5 h-2.5" />
-                    <span>Invited User ({contact.name.split(' ')[0]})</span>
-                  </button>
-                  <button
-                    id="role-switch-admin-btn"
-                    type="button"
-                    onClick={() => setViewerRole('admin')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      viewerRole === 'admin'
-                        ? 'bg-rose-600 text-white shadow-2xs'
-                        : isDark
-                        ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                    }`}
-                  >
-                    Admin
-                  </button>
-                  <button
-                    id="role-switch-other-user-btn"
-                    type="button"
-                    onClick={() => setViewerRole('other_user')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      viewerRole === 'other_user'
-                        ? 'bg-rose-600 text-white shadow-2xs'
-                        : isDark
-                        ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                    }`}
-                  >
-                    Other User (Not Invited)
+                    Decline
                   </button>
                 </div>
               </div>
-
-              {/* ONLY the invited user can see the Invitation Notification & Accept button */}
-              {isAllowedToSeeAndAcceptInvite ? (
-                <div className="space-y-2.5 animate-in fade-in duration-150">
-                  {/* Private Invitation Notification Banner visible ONLY to Invited User */}
-                  <div
-                    id="invited-user-only-notification-banner"
-                    className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center gap-2.5 text-xs"
-                  >
-                    <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                      <Bell className="w-4 h-4 animate-bounce" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-extrabold text-emerald-500 dark:text-emerald-300 text-xs">
-                        New Friend Invitation Notification (For {contact.name} Only)
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-300">
-                        <strong>{invitationRecord?.senderName || 'Sajol'}</strong> invited you to connect as friends. Only you ({contact.name}) can see this notification and accept it.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Invitation Card with Accept / Decline for the Invited User ONLY */}
-                  <div
-                    className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                      isDark
-                        ? 'bg-slate-900/90 border-emerald-500/30'
-                        : 'bg-white border-emerald-500/30 shadow-xs'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img
-                        src={contact.avatar}
-                        alt={contact.name}
-                        className="w-9 h-9 rounded-full object-cover border border-emerald-500 shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold truncate">
-                          Friend Invitation for {contact.name}
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          Verified as invited user ({contact.name}) • You can accept or decline
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        id="profile-accept-friend-invite-btn"
-                        type="button"
-                        onClick={handleAcceptFriendInviteAsInvitedUser}
-                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>Accept Friend Invite</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateInviteStatus('none', 'Friend invite declined by invited user.')}
-                        className={`px-2.5 py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
-                          isDark
-                            ? 'border-slate-700 text-slate-400 hover:bg-slate-800'
-                            : 'border-slate-200 text-slate-500 hover:bg-slate-100'
-                        }`}
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  id="non-invited-user-hidden-invite-notice"
-                  className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 text-xs ${
-                    viewerRole === 'admin' || viewerRole === 'other_user'
-                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                      : isDark
-                      ? 'bg-slate-900/70 border-slate-800 text-slate-300'
-                      : 'bg-white border-slate-200 text-slate-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Lock className="w-4 h-4 shrink-0 text-amber-400" />
-                    <span className="text-[11px] leading-snug">
-                      {viewerRole === 'admin'
-                        ? `Hidden from Admin: Admins cannot see ${contact.name}'s private friend invitation, notifications, or accept it.`
-                        : viewerRole === 'other_user'
-                        ? `Hidden from Other Users: Users who are not invited cannot see this invitation, notifications, or accept it.`
-                        : `Waiting for ${contact.name}: Only the invited user (${contact.name}) can see the invitation notification and accept it.`}
-                    </span>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -3635,6 +3577,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
 

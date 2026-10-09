@@ -102,6 +102,7 @@ interface MediaPictureGalleryViewProps {
   showSearch?: boolean;
   compact?: boolean;
   isGroupGallery?: boolean;
+  isAdminVerified?: boolean;
   groupParticipants?: GroupParticipant[];
   onShareWithGroupMembers?: (media: ActiveMediaItem, memberIds: string[], note?: string) => void;
 }
@@ -121,6 +122,7 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
   showSearch = true,
   compact = false,
   isGroupGallery = false,
+  isAdminVerified = false,
   groupParticipants,
   onShareWithGroupMembers,
 }) => {
@@ -1534,8 +1536,8 @@ export const MediaPictureGalleryView: React.FC<MediaPictureGalleryViewProps> = (
                     </div>
                   )}
 
-                  {/* Reported Status Badge */}
-                  {isReportedMedia && (
+                  {/* Reported Status Badge (Admin Only) */}
+                  {isAdminVerified && isReportedMedia && (
                     <div className="absolute bottom-2 left-2 z-10 px-2 py-0.5 rounded-full bg-amber-500/90 text-slate-950 text-[9px] font-extrabold flex items-center gap-1 shadow-sm">
                       <Flag className="w-2.5 h-2.5 fill-slate-950" />
                       <span>Reported to Admin</span>

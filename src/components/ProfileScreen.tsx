@@ -54,10 +54,17 @@ import { FriendshipModal } from './FriendshipModal';
 import {
   VerifiedCheckmarkBadge,
   getProfileValidationSummary,
-  markAccountProfileValidatedLocally,
+  saveUserIdDocumentLocally,
 } from './VerifiedCheckmarkBadge';
 import { uploadUserAvatarInDb, saveUserProfileToDb, updateUserOnlinePrivacyInDb, deleteMyUserAccountFromDb } from '../lib/firebase';
-import { getCleanAvatar, getInitialsAvatar, clearSavedUserAvatar, saveUserAvatarLocally } from '../lib/avatarHelper';
+import {
+  getCleanAvatar,
+  getInitialsAvatar,
+  clearSavedUserAvatar,
+  saveUserAvatarLocally,
+  getPersistentUserThumbnail,
+  isUploadedRealAvatar,
+} from '../lib/avatarHelper';
 import {
   FriendInvitationRecord,
   canUserSeeAndAcceptInvitation,
@@ -183,15 +190,41 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   const [profileThumbnailUrl, setProfileThumbnailUrl] = useState<string>(() => {
     try {
+      const uid = currentUser.id || 'user_abdullah';
       return (
-        currentUser.avatarThumbnailUrl ||
-        localStorage.getItem(`freedom_profile_thumbnail_${currentUser.id || 'user_abdullah'}`) ||
+        (isUploadedRealAvatar(currentUser.avatarThumbnailUrl)
+          ? currentUser.avatarThumbnailUrl
+          : '') ||
+        localStorage.getItem(`freedom_profile_thumbnail_${uid}`) ||
+        localStorage.getItem('freedom_active_user_thumbnail_v1') ||
+        (isUploadedRealAvatar(currentUser.avatar) ? currentUser.avatar : '') ||
         ''
       );
     } catch {
       return '';
     }
   });
+
+  // Always resolve a single persistent avatar/thumbnail for this user across Profile Page & Chats
+  const persistentUserAvatar =
+    (isUploadedRealAvatar(profileThumbnailUrl) ? profileThumbnailUrl : '') ||
+    getPersistentUserThumbnail(currentUser, true);
+
+  React.useEffect(() => {
+    const uid = currentUser.id || 'user_abdullah';
+    try {
+      const savedThumb =
+        (isUploadedRealAvatar(currentUser.avatarThumbnailUrl)
+          ? currentUser.avatarThumbnailUrl
+          : '') ||
+        localStorage.getItem(`freedom_profile_thumbnail_${uid}`) ||
+        localStorage.getItem('freedom_active_user_thumbnail_v1') ||
+        (isUploadedRealAvatar(currentUser.avatar) ? currentUser.avatar : '');
+      if (savedThumb && savedThumb !== profileThumbnailUrl) {
+        setProfileThumbnailUrl(savedThumb);
+      }
+    } catch {}
+  }, [currentUser.id, currentUser.avatar, currentUser.avatarThumbnailUrl]);
   const [profileCoverThumbnailUrl, setProfileCoverThumbnailUrl] = useState<string>(() => {
     try {
       return (
@@ -367,6 +400,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [isEditingInlineUsername, setIsEditingInlineUsername] = useState(false);
   const [isEditingInlineBio, setIsEditingInlineBio] = useState(false);
   const [isEditingInlinePhone, setIsEditingInlinePhone] = useState(false);
+  const [isFullAvatarViewerOpen, setIsFullAvatarViewerOpen] = useState(false);
   const [hidePhoneNumberPublic, setHidePhoneNumberPublic] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(
@@ -383,6 +417,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [pendingMediaReportsCount, setPendingMediaReportsCount] = useState<number>(() =>
     getReportedMediaFiles().filter((r) => r.status === 'pending').length
   );
+  const [hideAdminReportedOnProfile, setHideAdminReportedOnProfile] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('freedom_hide_admin_reported_on_profile_v1');
+      if (saved === 'false') return false;
+      return true;
+    } catch {
+      return true;
+    }
+  });
   const [fingerprintRecord, setFingerprintRecord] = useState<FingerprintRecord | null>(() =>
     getFingerprintRecord(currentUser.id)
   );
@@ -710,24 +753,31 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         resolvedFileSize = result.fileSize || thumbGen.fileSize;
       }
 
+      // Use compact 180x180 HD thumbnail if full image exceeds localStorage safe size so it never disappears
+      const safePersistentAvatarUrl =
+        resolvedAvatarUrl && resolvedAvatarUrl.length <= 220000
+          ? resolvedAvatarUrl
+          : thumbGen.thumbnailDataUrl || resolvedAvatarUrl;
+
+      const uid = currentUser.id || 'user_abdullah';
       saveUserAvatarLocally(
-        currentUser.id || 'user_abdullah',
-        resolvedAvatarUrl,
+        uid,
+        safePersistentAvatarUrl,
         resolvedFileName,
-        resolvedFileSize
+        resolvedFileSize,
+        thumbGen.thumbnailDataUrl
       );
 
       try {
-        localStorage.setItem(
-          `freedom_profile_thumbnail_${currentUser.id || 'user_abdullah'}`,
-          thumbGen.thumbnailDataUrl
-        );
+        localStorage.setItem(`freedom_profile_thumbnail_${uid}`, thumbGen.thumbnailDataUrl);
+        localStorage.setItem('freedom_active_user_thumbnail_v1', thumbGen.thumbnailDataUrl);
+        localStorage.setItem('freedom_active_user_avatar_v1', safePersistentAvatarUrl);
       } catch {}
       setProfileThumbnailUrl(thumbGen.thumbnailDataUrl);
 
       const updatedUser: UserProfile = {
         ...currentUser,
-        avatar: resolvedAvatarUrl,
+        avatar: safePersistentAvatarUrl,
         avatarThumbnailUrl: thumbGen.thumbnailDataUrl,
         avatarFileName: resolvedFileName,
         avatarFileSize: resolvedFileSize,
@@ -735,6 +785,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       };
 
       onUpdateCurrentUser(updatedUser);
+      try {
+        await saveUserProfileToDb({
+          id: uid,
+          name: updatedUser.name,
+          avatar: safePersistentAvatarUrl,
+          avatarThumbnailUrl: thumbGen.thumbnailDataUrl,
+          avatarFileName: resolvedFileName,
+          avatarFileSize: resolvedFileSize,
+        });
+      } catch {}
       setUploadStatusMsg(
         `✅ Uploaded "${resolvedFileName}" & automatically generated ${thumbGen.thumbnailDimensions} profile thumbnail!`
       );
@@ -789,9 +849,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     const cleanBio = editBio.trim() || currentUser.bio || 'Freedom talk any person of your mother language';
     const cleanAge = editAge.trim();
     const cleanGender = editGender.trim();
-    const validatedNow = markAccountProfileValidatedLocally(
-      currentUser.id || 'admin_mobilephonesky'
-    );
     const updated: UserProfile = {
       ...currentUser,
       name: editName.trim() || currentUser.name,
@@ -803,8 +860,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       email: cleanEmail,
       phoneNumber: cleanPhone,
       hidePhoneNumberPublic,
-      isVerified: true,
-      profileValidatedAt: currentUser.profileValidatedAt || validatedNow,
     };
     onUpdateCurrentUser(updated);
     setIsEditingProfile(false);
@@ -840,7 +895,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         phoneNumber: cleanPhone,
         hidePhoneNumberPublic,
         motherLanguage,
-        isVerified: true,
+        isVerified: updated.isVerified,
         profileValidatedAt: updated.profileValidatedAt,
       });
       setUploadStatusMsg('Profile, @Username, About, Age, Gender, Email & Phone synced to database');
@@ -1016,15 +1071,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       {/* Top Header */}
       <div
         style={{ backgroundColor: primaryColor }}
-        className="text-white pt-1 pb-4 px-5 rounded-b-[28px] shadow-sm z-10 transition-colors"
+        className="text-white pt-1 pb-3.5 px-4 sm:px-5 rounded-b-[24px] shadow-sm z-10 transition-colors shrink-0"
       >
-        <StatusBar time="9:41" theme="dark" className="px-1 -mx-3" />
+        <StatusBar time="9:41" theme="dark" className="px-1 -mx-2" />
 
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Profile</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">Profile</h1>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               id="profile-header-open-chats-btn"
               type="button"
@@ -1042,7 +1097,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               title="Sign Out or Register a New User Account"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-300" />
-              <span>Switch / Logout</span>
+              <span>Logout</span>
             </button>
             {isAdminVerified && (
               <button
@@ -1063,7 +1118,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             )}
             <button
               onClick={onToggleTheme}
-              className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all cursor-pointer"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-all cursor-pointer"
               title="Toggle theme"
             >
               {isDark ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-white" />}
@@ -1072,26 +1127,29 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </div>
       </div>
 
-      {/* Profile Body */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {/* User Card with Profile Cover Banner, File Dropzone & Avatar Target */}
+      {/* Profile Body — Mobile-Friendly Smooth Touch Scroll */}
+      <div
+        style={{ WebkitOverflowScrolling: 'touch' }}
+        className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y scroll-smooth px-3 sm:px-4 pt-3 pb-28 space-y-4"
+      >
+        {/* User Card with Profile Cover Banner, Full Mobile Avatar & Clean Mobile Info Layout */}
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`rounded-2xl transition-all relative border overflow-hidden ${
+          className={`rounded-3xl transition-all relative border overflow-hidden shadow-sm ${
             isDragging
               ? 'border-purple-500 bg-purple-500/10'
               : isDark
               ? 'bg-[#1A202C]/95 border-slate-800'
-              : 'bg-slate-50/95 border-slate-200/70'
+              : 'bg-white border-slate-200/80'
           }`}
         >
-          {/* User Profile Cover Banner */}
+          {/* User Profile Cover Banner (Matching Screenshot_20261009-040512.png) */}
           <div
             id="my-profile-cover-banner"
             style={{ backgroundColor: primaryColor }}
-            className="relative h-28 sm:h-32 w-full overflow-hidden"
+            className="relative h-32 sm:h-36 w-full overflow-hidden"
           >
             {profileCoverUrl && (
               <>
@@ -1100,125 +1158,93 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   alt="User Profile Cover"
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/30" />
               </>
             )}
 
-            <div className="absolute top-2.5 left-3 flex items-center gap-1.5">
-              <span className="px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md text-white text-[10px] font-extrabold border border-white/20 flex items-center gap-1">
-                <ImageIcon className="w-3 h-3 text-purple-300" />
-                <span>Profile Cover</span>
-              </span>
-            </div>
-
-            <div className="absolute top-2.5 right-3 flex items-center gap-1.5">
+            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center gap-1.5 flex-wrap">
               <button
                 id="upload-my-profile-cover-btn"
                 type="button"
                 onClick={() => profileCoverInputRef.current?.click()}
-                className="px-2.5 py-1 rounded-full bg-black/60 hover:bg-black/80 text-white text-[10px] font-bold backdrop-blur-md border border-white/20 flex items-center gap-1 cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white text-[11px] font-extrabold backdrop-blur-md border border-white/15 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
                 title="Upload Profile Cover Image"
               >
-                <Camera className="w-3 h-3 text-purple-300" />
-                <span>Upload Cover</span>
+                <Camera className="w-3.5 h-3.5 text-purple-300" />
+                <span>Upload Profile Cover</span>
               </button>
 
               <button
                 id="upload-my-profile-wallpaper-btn"
                 type="button"
                 onClick={() => profileWallpaperInputRef.current?.click()}
-                className="px-2.5 py-1 rounded-full bg-black/60 hover:bg-black/80 text-white text-[10px] font-bold backdrop-blur-md border border-white/20 flex items-center gap-1 cursor-pointer transition-all"
-                title="Upload Profile Page Wallpaper"
+                className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white text-[11px] font-extrabold backdrop-blur-md border border-white/15 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                title="Profile Wallpaper"
               >
-                <ImageIcon className="w-3 h-3 text-emerald-400" />
-                <span>Upload Wallpaper</span>
+                <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Profile Wallpaper</span>
               </button>
 
-              {(profileCoverUrl || profileWallpaperUrl) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileWallpaperUrl('');
-                    try {
-                      localStorage.removeItem('freedom_my_profile_wallpaper');
-                    } catch {}
-                    setUploadStatusMsg('Reset Profile Page Wallpaper to default theme.');
-                    setTimeout(() => setUploadStatusMsg(null), 2500);
-                  }}
-                  className="px-2 py-1 rounded-full bg-rose-600/75 hover:bg-rose-600 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
-                  title="Reset Profile Page Wallpaper"
-                >
-                  Reset
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => profileWallpaperInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-full bg-emerald-600/90 hover:bg-emerald-500 text-white text-[11px] font-extrabold backdrop-blur-md border border-emerald-300/30 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                title="Upload Wallpaper"
+              >
+                <Upload className="w-3.5 h-3.5 text-white" />
+                <span>Upload Wallpaper</span>
+              </button>
             </div>
           </div>
 
-          <div className="p-4 pt-3">
-          <div className="flex items-start gap-4 relative z-10">
-            {/* Avatar with Camera Trigger & Target File Overlay */}
-            <div className="relative group shrink-0 -mt-10">
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                style={{ borderColor: primaryColor, width: '100px', height: '100px' }}
-                className={`relative w-[100px] h-[100px] overflow-hidden border-2 shadow-md cursor-pointer group-hover:opacity-90 transition-all ${
-                  currentUser.avatarShape === 'squircle' ? 'rounded-2xl' : 'rounded-full'
-                }`}
-                title="Click to target user files and upload avatar"
-              >
-                <img
-                  src={currentUser.avatar}
-                  alt={currentUser.name}
-                  className="w-full h-full object-cover"
-                />
-                {isUploading && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                    <Loader2 style={{ color: primaryColor }} className="w-6 h-6 animate-spin" />
+          <div className="px-4 pb-4 pt-2">
+            {/* Avatar Overlapping Cover Banner + Location & Verified Badge Row Below Cover (Matching User Profile Screenshot) */}
+            <div className="space-y-3">
+              <div className="flex items-start gap-3.5">
+                {/* Circular User Profile Avatar Overlapping Bottom-Left of Cover Banner */}
+                <div className="relative group shrink-0 -mt-12 sm:-mt-14 z-10">
+                  <div
+                    onClick={() => setIsFullAvatarViewerOpen(true)}
+                    style={{ borderColor: primaryColor }}
+                    className={`relative w-26 h-26 sm:w-30 sm:h-30 overflow-hidden border-4 shadow-xl cursor-pointer bg-slate-900 ring-4 ring-white dark:ring-[#1A202C] transition-transform active:scale-95 ${
+                      currentUser.avatarShape === 'squircle' ? 'rounded-3xl' : 'rounded-full'
+                    }`}
+                    title="Tap to view full User Profile Avatar"
+                  >
+                    <img
+                      id="profile-page-full-avatar-img"
+                      src={persistentUserAvatar}
+                      alt={currentUser.name}
+                      className="w-full h-full object-cover"
+                    />
+                    {isUploading && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <Loader2 style={{ color: primaryColor }} className="w-6 h-6 animate-spin" />
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white">
-                  <Camera className="w-5 h-5 mb-0.5" />
-                  <span className="text-[9px] font-bold">Change</span>
+
+                  {/* Camera circular badge button at bottom-right of avatar */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    style={{ backgroundColor: primaryColor }}
+                    className="absolute bottom-0.5 right-0.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full hover:brightness-110 active:scale-95 text-white shadow-lg flex items-center justify-center cursor-pointer border-2 border-white dark:border-[#1A202C] transition-transform"
+                    title="Upload new profile photo from device"
+                  >
+                    <Camera className="w-4 h-4 stroke-[2.5]" />
+                  </button>
                 </div>
-              </div>
 
-              {/* Camera circular badge button */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                style={{ backgroundColor: primaryColor }}
-                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full hover:brightness-110 active:scale-95 text-white shadow-sm flex items-center justify-center cursor-pointer border-2 border-white dark:border-[#1A202C] transition-transform"
-                title="Target image file on device"
-              >
-                <Camera className="w-3.5 h-3.5 stroke-[2.5]" />
-              </button>
-            </div>
-
-            {/* Profile Info or Edit form */}
-            <div className="flex-1 min-w-0">
-              {!isEditingProfile ? (
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <h2 className="font-extrabold text-base tracking-tight truncate">
-                        {currentUser.name}
-                      </h2>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                          currentUser.hideOnlineStatus
-                            ? 'bg-slate-500/15 text-slate-400 border border-slate-500/30'
-                            : 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            currentUser.hideOnlineStatus ? 'bg-slate-400' : 'bg-emerald-500 animate-pulse'
-                          }`}
-                        />
-                        <span>{currentUser.hideOnlineStatus ? 'Online Hidden' : 'Online'}</span>
-                      </span>
-                    </div>
+                {/* Right of Avatar (Immediately Below Cover Banner): Location + Verified Seal Badge & @username */}
+                <div className="flex-1 min-w-0 pt-0.5 space-y-1 text-left">
+                  {/* Location + Verified Seal Badge Row Below Cover */}
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
+                      id="my-profile-location-display"
                       type="button"
                       onClick={() => {
                         setEditName(currentUser.name);
@@ -1238,20 +1264,31 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
                         setIsEditingProfile(true);
                       }}
-                      className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
-                      title="Edit Profile, @Username, About, Age, Gender, Email & Phone"
+                      className={`text-sm font-semibold tracking-tight flex items-center gap-1.5 hover:opacity-80 cursor-pointer ${
+                        isDark ? 'text-slate-100' : 'text-slate-900'
+                      }`}
+                      title="Click to edit location & profile"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>{currentUser.location || 'New York,NY'}</span>
+                      <Edit2 className="w-3.5 h-3.5 text-slate-400 opacity-75" />
                     </button>
+
+                    {getProfileValidationSummary(currentUser).isValidated && (
+                      <VerifiedCheckmarkBadge
+                        id="my-profile-verified-badge"
+                        variant="profile_seal"
+                        title="Verified Profile • Account Verified by Admin"
+                      />
+                    )}
                   </div>
 
-                  {/* @Username with inline edit */}
+                  {/* @username with Edit Pencil */}
                   {isEditingInlineUsername ? (
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <div className="relative flex-1 max-w-[200px]">
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative flex-1 max-w-[180px]">
                         <span
                           style={{ color: primaryColor }}
-                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-extrabold"
+                          className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-extrabold"
                         >
                           @
                         </span>
@@ -1261,97 +1298,165 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                           onChange={(e) => setEditUsername(e.target.value.replace(/^@+/, ''))}
                           placeholder="username"
                           autoFocus
-                          className="w-full pl-6 pr-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500"
+                          className="w-full pl-5 pr-2 py-0.5 rounded-lg text-xs font-mono font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500"
                         />
                       </div>
                       <button
                         type="button"
                         onClick={handleSaveProfileEdits}
                         style={{ backgroundColor: primaryColor }}
-                        className="px-2.5 py-1 rounded-lg text-white text-[10px] font-bold cursor-pointer"
+                        className="p-1 rounded-md text-white cursor-pointer"
                       >
-                        Save
+                        <Check className="w-3 h-3" />
                       </button>
                       <button
                         type="button"
                         onClick={() => setIsEditingInlineUsername(false)}
-                        className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
+                        className="p-1 rounded-md text-slate-400 hover:text-white cursor-pointer"
                       >
-                        Cancel
+                        <X className="w-3 h-3" />
                       </button>
                     </div>
                   ) : (
-                    <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-                      <p style={{ color: primaryColor }} className="text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditUsername((currentUser.username || 'sajol_freedom').replace(/^@+/, ''));
+                        setIsEditingInlineUsername(true);
+                      }}
+                      style={{ color: primaryColor }}
+                      className="text-xs sm:text-sm font-mono font-bold flex items-center gap-1.5 hover:opacity-80 cursor-pointer"
+                      title="Edit @username"
+                    >
+                      <span className="truncate">
                         @{(currentUser.username || 'sajol_freedom').replace(/^@+/, '')}
-                      </p>
+                      </span>
+                      <Edit2 className="w-3.5 h-3.5 opacity-80 shrink-0" />
+                    </button>
+                  )}
+
+                  {/* Gender • Age Pill & Status */}
+                  <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                    <span className="inline-block text-[11px] px-2.5 py-0.5 rounded-full bg-slate-500/15 text-slate-500 dark:text-slate-300 font-semibold">
+                      {currentUser.gender || 'Female'} • {currentUser.age || 25} yrs
+                    </span>
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                      <span
+                        style={{ backgroundColor: primaryColor }}
+                        className="w-2 h-2 rounded-full shrink-0"
+                      />
+                      <span>
+                        {currentUser.hideOnlineStatus
+                          ? 'Last seen recently'
+                          : 'Active now • Online'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Profile Info or Edit form Below */}
+              <div className="w-full min-w-0 pt-1">
+                {!isEditingProfile ? (
+                  <div className="space-y-2.5 w-full">
+                    {/* Row: Name + Edit Profile Button */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h2 className="font-extrabold text-base sm:text-lg tracking-tight">
+                        {currentUser.name}
+                      </h2>
                       <button
                         type="button"
                         onClick={() => {
-                          setEditUsername((currentUser.username || 'sajol_freedom').replace(/^@+/, ''));
-                          setIsEditingInlineUsername(true);
+                          setEditName(currentUser.name);
+                          setEditUsername((currentUser.username || 'weedchat_user').replace(/^@+/, ''));
+                          setEditBio(currentUser.bio || '');
+                          setEditAge(
+                            currentUser.age !== undefined && currentUser.age !== null
+                              ? String(currentUser.age)
+                              : ''
+                          );
+                          setEditGender(currentUser.gender || '');
+                          setEditLocation(currentUser.location || 'New York,NY');
+                          setEditEmail(
+                            currentUser.email ||
+                              `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`
+                          );
+                          setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
+                          setIsEditingProfile(true);
                         }}
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold cursor-pointer transition ${
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border cursor-pointer transition ${
                           isDark
-                            ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                         }`}
-                        title="Edit @username"
+                        title="Edit Profile, @Username, About, Age, Gender, Email & Phone"
                       >
-                        <Edit2 className="w-2.5 h-2.5" />
-                        <span>Edit @</span>
+                        <Edit2 className="w-3 h-3" />
+                        <span>Edit Profile</span>
                       </button>
-                      {currentUser.age && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                            isDark
-                              ? 'bg-slate-800 border-slate-700 text-slate-200'
-                              : 'bg-white border-slate-200 text-slate-700'
-                          }`}
-                        >
-                          Age: {currentUser.age}
-                        </span>
-                      )}
-                      {currentUser.gender && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                            currentUser.gender === 'Female'
-                              ? 'bg-pink-500/15 border-pink-500/40 text-pink-400'
-                              : 'bg-sky-500/15 border-sky-500/40 text-sky-400'
-                          }`}
-                        >
-                          {currentUser.gender === 'Female' ? '♀ Female' : '♂ Male'}
-                        </span>
-                      )}
                     </div>
-                  )}
-                  <div className="mt-1 flex items-center justify-between gap-3 flex-wrap">
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                      <span
-                        style={{ backgroundColor: primaryColor }}
-                        className="w-1.5 h-1.5 rounded-full"
-                      />
-                      <span>{currentUser.statusText || (currentUser.hideOnlineStatus ? 'Offline' : 'Busy')}</span>
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <span
-                        id="my-profile-location-display"
-                        className={`text-xs sm:text-sm font-medium tracking-tight ${
-                          isDark ? 'text-slate-100' : 'text-slate-900'
+
+                    {/* Row 3: Mobile-Friendly Full-Width Bio / About Box */}
+                    {isEditingInlineBio ? (
+                      <div className="space-y-1.5 text-left">
+                        <textarea
+                          value={editBio}
+                          onChange={(e) => setEditBio(e.target.value)}
+                          rows={2}
+                          maxLength={200}
+                          placeholder="Write your About description..."
+                          className="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500 resize-none"
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleSaveProfileEdits}
+                            style={{ backgroundColor: primaryColor }}
+                            className="px-2.5 py-1 rounded-md text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            Save About
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingInlineBio(false)}
+                            className="px-2 py-1 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-left ${
+                          isDark
+                            ? 'bg-slate-900/60 border-slate-800 text-slate-300'
+                            : 'bg-slate-50 border-slate-200/80 text-slate-600'
                         }`}
                       >
-                        {currentUser.location || 'New York,NY'}
-                      </span>
-                      {getProfileValidationSummary(currentUser).isValidated && (
-                        <VerifiedCheckmarkBadge
-                          id="my-profile-verified-badge"
-                          variant="profile_seal"
-                          title="Verified Profile • Account Profile Validation Completed"
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                        <p className="text-xs italic flex-1">
+                          "{currentUser.bio || 'Freedom talk any person of your mother language'}"
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditBio(currentUser.bio || 'Freedom talk any person of your mother language');
+                            setIsEditingInlineBio(true);
+                          }}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold shrink-0 cursor-pointer transition ${
+                            isDark
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}
+                          title="Edit About description"
+                        >
+                          <Edit2 className="w-2.5 h-2.5" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Row 4: Full-Width Mobile Contact Details (Email & Phone) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left text-xs">
                       <button
                         type="button"
                         onClick={() => {
@@ -1365,212 +1470,185 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                           setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
                           setIsEditingProfile(true);
                         }}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border cursor-pointer hover:border-purple-500/60 transition-colors ${
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer hover:border-purple-500/60 transition-colors ${
                           isDark
-                            ? 'bg-slate-800/70 border-slate-700 text-slate-200'
-                            : 'bg-white border-slate-200 text-slate-700'
+                            ? 'bg-slate-900/70 border-slate-800 text-slate-200'
+                            : 'bg-slate-50 border-slate-200/90 text-slate-700'
                         }`}
                         title="Click to edit Email Address"
                       >
-                        <Mail style={{ color: primaryColor }} className="w-3 h-3 shrink-0" />
-                        <span className="font-mono truncate max-w-[160px]">
-                          {currentUser.email ||
-                            `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`}
-                        </span>
-                        <Edit2 className="w-2.5 h-2.5 text-slate-400" />
-                      </button>
-
-                    {isEditingInlinePhone ? (
-                      <div className="flex items-center gap-1.5 flex-wrap w-full pt-1">
-                        <div className="flex items-center gap-1 flex-1 min-w-[170px]">
-                          <Phone style={{ color: primaryColor }} className="w-3.5 h-3.5 shrink-0" />
-                          <input
-                            id="profile-header-inline-phone-input"
-                            type="tel"
-                            value={editPhoneNumber}
-                            onChange={(e) => setEditPhoneNumber(e.target.value)}
-                            placeholder="+1 (555) 234-8901"
-                            autoFocus
-                            className="flex-1 px-2.5 py-1 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleSaveProfileEdits}
-                          style={{ backgroundColor: primaryColor }}
-                          className="px-2.5 py-1 rounded-lg text-white text-[10px] font-bold cursor-pointer"
-                        >
-                          Save Phone
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleHidePhonePublic()}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer ${
-                            hidePhoneNumberPublic
-                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
-                              : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500'
-                          }`}
-                          title="Toggle whether your phone number is hidden from public"
-                        >
-                          {hidePhoneNumberPublic ? (
-                            <>
-                              <EyeOff className="w-2.5 h-2.5" />
-                              <span>Hidden Public</span>
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="w-2.5 h-2.5" />
-                              <span>Public</span>
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingInlinePhone(false)}
-                          className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="inline-flex items-center gap-1 flex-wrap">
-                        <button
-                          id="profile-header-edit-phone-chip"
-                          type="button"
-                          onClick={() => {
-                            setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
-                            setIsEditingInlinePhone(true);
-                          }}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border cursor-pointer hover:border-purple-500/60 transition-colors ${
-                            isDark
-                              ? 'bg-slate-800/70 border-slate-700 text-slate-200'
-                              : 'bg-white border-slate-200 text-slate-700'
-                          }`}
-                          title="Click to edit Phone Number on User Profile page"
-                        >
-                          <Phone style={{ color: primaryColor }} className="w-3 h-3 shrink-0" />
-                          <span className="font-mono truncate">
-                            {currentUser.phoneNumber || '+1 (555) 234-8901'}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Mail style={{ color: primaryColor }} className="w-3.5 h-3.5 shrink-0" />
+                          <span className="font-mono text-[11px] truncate">
+                            {currentUser.email ||
+                              `${(currentUser.username || 'user').replace(/^@+/, '')}@weedchat.app`}
                           </span>
-                          <Edit2 className="w-2.5 h-2.5 text-slate-400" />
-                        </button>
+                        </div>
+                        <Edit2 className="w-3 h-3 text-slate-400 shrink-0" />
+                      </button>
 
-                        <button
-                          id="profile-header-toggle-hide-phone-public-btn"
-                          type="button"
-                          onClick={() => handleToggleHidePhonePublic()}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold cursor-pointer transition-all ${
-                            hidePhoneNumberPublic
-                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25'
-                              : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/25'
+                      {isEditingInlinePhone ? (
+                        <div className="flex items-center gap-1.5 flex-wrap w-full">
+                          <div className="flex items-center gap-1 flex-1 min-w-[150px]">
+                            <Phone style={{ color: primaryColor }} className="w-3.5 h-3.5 shrink-0" />
+                            <input
+                              id="profile-header-inline-phone-input"
+                              type="tel"
+                              value={editPhoneNumber}
+                              onChange={(e) => setEditPhoneNumber(e.target.value)}
+                              placeholder="+1 (555) 234-8901"
+                              autoFocus
+                              className="flex-1 px-2.5 py-1.5 rounded-lg text-xs font-mono border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSaveProfileEdits}
+                            style={{ backgroundColor: primaryColor }}
+                            className="px-2.5 py-1.5 rounded-lg text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingInlinePhone(false)}
+                            className="px-2 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          className={`w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl border ${
+                            isDark
+                              ? 'bg-slate-900/70 border-slate-800 text-slate-200'
+                              : 'bg-slate-50 border-slate-200/90 text-slate-700'
                           }`}
-                          title={
-                            hidePhoneNumberPublic
-                              ? 'Phone number is hidden from public — click to make public'
-                              : 'Phone number is public — click to hide from public'
-                          }
                         >
-                          {hidePhoneNumberPublic ? (
-                            <>
-                              <EyeOff className="w-2.5 h-2.5" />
-                              <span>Phone Hidden (Public)</span>
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="w-2.5 h-2.5" />
-                              <span>Hide Phone Public</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {/* Inline Editable About Description */}
-                  {isEditingInlineBio ? (
-                    <div className="mt-1.5 space-y-1.5">
-                      <textarea
-                        value={editBio}
-                        onChange={(e) => setEditBio(e.target.value)}
-                        rows={2}
-                        maxLength={200}
-                        placeholder="Write your About description..."
-                        className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-purple-500 resize-none"
-                      />
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={handleSaveProfileEdits}
-                          style={{ backgroundColor: primaryColor }}
-                          className="px-2.5 py-1 rounded-md text-white text-[10px] font-bold cursor-pointer"
-                        >
-                          Save About
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingInlineBio(false)}
-                          className="px-2 py-1 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                          <button
+                            id="profile-header-edit-phone-chip"
+                            type="button"
+                            onClick={() => {
+                              setEditPhoneNumber(currentUser.phoneNumber || '+1 (555) 234-8901');
+                              setIsEditingInlinePhone(true);
+                            }}
+                            className="flex items-center gap-1.5 min-w-0 cursor-pointer hover:opacity-80"
+                            title="Click to edit Phone Number"
+                          >
+                            <Phone style={{ color: primaryColor }} className="w-3.5 h-3.5 shrink-0" />
+                            <span className="font-mono text-[11px] truncate">
+                              {currentUser.phoneNumber || '+1 (555) 234-8901'}
+                            </span>
+                            <Edit2 className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                          </button>
+
+                          <button
+                            id="profile-header-toggle-hide-phone-public-btn"
+                            type="button"
+                            onClick={() => handleToggleHidePhonePublic()}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold cursor-pointer shrink-0 transition-all ${
+                              hidePhoneNumberPublic
+                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                                : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500'
+                            }`}
+                            title="Toggle phone public visibility"
+                          >
+                            {hidePhoneNumberPublic ? (
+                              <>
+                                <EyeOff className="w-2.5 h-2.5" />
+                                <span>Hidden</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="w-2.5 h-2.5" />
+                                <span>Public</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="mt-1 flex items-start justify-between gap-2 group/bio">
-                      <p className="text-[11px] text-slate-400 line-clamp-2 flex-1">
-                        "{currentUser.bio || 'Freedom talk any person of your mother language'}"
-                      </p>
+
+                    {/* Row 5: Mobile Action Buttons (Upload Avatar, View Full Avatar, Upload ID Document for Admin Verification) */}
+                    <div className="flex items-center justify-center sm:justify-start gap-2 pt-1 flex-wrap">
+                      <button
+                        id="profile-auto-upload-avatar-btn"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{ backgroundColor: primaryColor }}
+                        className="flex-1 sm:flex-initial justify-center px-3.5 py-2 rounded-xl text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:brightness-110 active:scale-95 transition-all shadow-xs"
+                        title="Upload profile avatar image from device (auto-saves immediately)"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Upload Avatar</span>
+                      </button>
+
                       <button
                         type="button"
-                        onClick={() => {
-                          setEditBio(currentUser.bio || 'Freedom talk any person of your mother language');
-                          setIsEditingInlineBio(true);
-                        }}
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold shrink-0 cursor-pointer transition ${
+                        onClick={() => setIsFullAvatarViewerOpen(true)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition-all ${
                           isDark
-                            ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                         }`}
-                        title="Edit About description"
+                        title="View Full User Profile Avatar"
                       >
-                        <Edit2 className="w-2.5 h-2.5" />
-                        <span>Edit About</span>
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Full Avatar</span>
                       </button>
+
+                      <label
+                        id="profile-upload-id-document-label"
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition-all ${
+                          isDark
+                            ? 'bg-slate-800 border-slate-700 text-sky-400 hover:bg-slate-700'
+                            : 'bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100'
+                        }`}
+                        title="Upload ID or Document Picture for Admin Account Verification"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Upload ID Document</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            const reader = new FileReader();
+                            reader.onload = async () => {
+                              const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+                              if (!dataUrl) return;
+                              const uid = currentUser.id || 'admin_mobilephonesky';
+                              saveUserIdDocumentLocally(uid, dataUrl, f.name);
+                              const updated: UserProfile = {
+                                ...currentUser,
+                                idDocumentUrl: dataUrl,
+                                idDocumentName: f.name,
+                              };
+                              onUpdateCurrentUser(updated);
+                              try {
+                                await saveUserProfileToDb({
+                                  id: uid,
+                                  name: updated.name,
+                                  avatar: updated.avatar,
+                                  idDocumentUrl: dataUrl,
+                                  idDocumentName: f.name,
+                                });
+                              } catch {}
+                              setUploadStatusMsg(
+                                `✅ ID Document "${f.name}" uploaded! Admin can now verify and reward your account badge.`
+                              );
+                              setTimeout(() => setUploadStatusMsg(null), 4000);
+                            };
+                            reader.readAsDataURL(f);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
                     </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <button
-                      id="profile-auto-upload-avatar-btn"
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{ backgroundColor: primaryColor }}
-                      className="px-3 py-1.5 rounded-xl text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer hover:brightness-110 active:scale-95 transition-all shadow-xs"
-                      title="Upload profile avatar image from device (auto-saves immediately)"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Upload & Auto-Save Avatar</span>
-                    </button>
-                    {getProfileValidationSummary(currentUser).isValidated ? (
-                      <VerifiedCheckmarkBadge
-                        id="my-profile-validated-pill"
-                        variant="pill"
-                        label="Profile Validated"
-                        title="Your account profile validation is complete and your verified checkmark appears in the chat header"
-                      />
-                    ) : (
-                      <button
-                        id="complete-profile-validation-btn"
-                        type="button"
-                        onClick={handleSaveProfileEdits}
-                        className="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-xs"
-                        title="Complete Account Profile Validation to display the verified checkmark next to your name"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>Validate Profile</span>
-                      </button>
-                    )}
                   </div>
-                </>
-              ) : (
+                ) : (
                 <div className="space-y-2">
                   <input
                     type="text"
@@ -1749,11 +1827,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-purple-500/40 shrink-0 bg-slate-900">
                 <img
-                  src={
-                    profileThumbnailUrl ||
-                    currentUser.avatarThumbnailUrl ||
-                    getCleanAvatar(currentUser.avatar, currentUser.name)
-                  }
+                  src={persistentUserAvatar}
                   alt="Auto-Generated Profile Thumbnail"
                   className="w-full h-full object-cover"
                 />
@@ -1866,196 +1940,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </button>
           </div>
 
-          {/* Viewer Identity Access Control Selector (Enforces Invited-User-Only Visibility & Notifications) */}
-          <div
-            className={`p-3 rounded-xl border space-y-2 ${
-              isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200/80'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Lock className="w-3 h-3 text-amber-500" />
-                <span>Viewing Invitations & Notifications As:</span>
-              </span>
-              <span className="text-[10px] font-bold text-emerald-500">
-                Invited-User-Only Access
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setActiveViewerId('sender')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                  activeViewerId === 'sender'
-                    ? 'bg-violet-600 text-white shadow-2xs'
-                    : isDark
-                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                You (Sender)
-              </button>
-              {individualContacts.map((c) => (
-                <button
-                  key={`viewer-${c.id}`}
-                  type="button"
-                  onClick={() => setActiveViewerId(c.id)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                    activeViewerId === c.id
-                      ? 'bg-emerald-600 text-white shadow-2xs'
-                      : isDark
-                      ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  <span>{c.name.split(' ')[0]} (Invited User)</span>
-                  {inviteStatusMap[c.id] === 'pending' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  )}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setActiveViewerId('admin')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                  activeViewerId === 'admin'
-                    ? 'bg-rose-600 text-white shadow-2xs'
-                    : isDark
-                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Admin (Blocked)
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveViewerId('other_user')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                  activeViewerId === 'other_user'
-                    ? 'bg-rose-600 text-white shadow-2xs'
-                    : isDark
-                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Other Uninvited User (Blocked)
-              </button>
-            </div>
+          {/* Friends Suggest Header */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <UserPlus style={{ color: primaryColor }} className="w-3.5 h-3.5" />
+              <span>Friends Suggest</span>
+            </span>
           </div>
 
-          {/* Invited-User-Only Invitation Notification Banner */}
-          {(() => {
-            const invitedContact = individualContacts.find((c) => c.id === activeViewerId);
-            if (!invitedContact) return null;
-            const status = inviteStatusMap[invitedContact.id] || 'none';
-            if (status !== 'pending') return null;
-            const rec: FriendInvitationRecord = {
-              id: `invite_${invitedContact.id}`,
-              senderId: currentUser.id || 'current_user',
-              senderName: currentUser.name || 'You',
-              senderAvatar: currentUser.avatar || '',
-              invitedUserId: invitedContact.id,
-              invitedUserName: invitedContact.name,
-              invitedUserAvatar: invitedContact.avatar,
-              status: 'pending',
-              createdAt: new Date().toISOString(),
-            };
-            const isAllowed = canUserSeeAndAcceptInvitation(
-              rec,
-              activeViewerId,
-              'invited_user'
-            );
-            if (!isAllowed) return null;
-            return (
-              <div
-                id="profile-invited-user-only-notification"
-                className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 ${
-                  isDark
-                    ? 'bg-emerald-950/35 border-emerald-500/40 text-emerald-200'
-                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                }`}
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
-                    <Bell className="w-4 h-4 animate-bounce" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-extrabold">
-                      Private Invitation Notification for {invitedContact.name}
-                    </p>
-                    <p className="text-[10px] opacity-85 truncate">
-                      Only you ({invitedContact.name}) can see this notification and accept the Friend Invite.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSetContactInviteStatus(
-                      invitedContact.id,
-                      'accepted',
-                      `${invitedContact.name} accepted your Friend Invite! 🎉`
-                    )
-                  }
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Accept Invite</span>
-                </button>
-              </div>
-            );
-          })()}
-
-          {(activeViewerId === 'admin' || activeViewerId === 'other_user') && (
-            <div
-              className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${
-                isDark
-                  ? 'bg-slate-900/90 border-slate-800 text-slate-400'
-                  : 'bg-slate-100 border-slate-200 text-slate-600'
-              }`}
-            >
-              <Lock className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-              <span>
-                <strong>Invitation & Notification Hidden:</strong>{' '}
-                {activeViewerId === 'admin' ? 'Admin' : 'Other uninvited users'} cannot see pending
-                invitations, invitation notifications, or accept invitations sent to another user.
-              </span>
-            </div>
-          )}
-
-          {/* Invited Users List with "Accept" Option Exclusively for the Invited User */}
+          {/* Friends Suggest List */}
           <div className="space-y-2 pt-1">
             {individualContacts.map((contactItem) => {
               const status = inviteStatusMap[contactItem.id] || 'none';
-              const rec: FriendInvitationRecord = {
-                id: `invite_${contactItem.id}`,
-                senderId: currentUser.id || 'current_user',
-                senderName: currentUser.name || 'You',
-                senderAvatar: currentUser.avatar || '',
-                invitedUserId: contactItem.id,
-                invitedUserName: contactItem.name,
-                invitedUserAvatar: contactItem.avatar,
-                status,
-                createdAt: new Date().toISOString(),
-              };
-              const viewerRole =
-                activeViewerId === 'admin'
-                  ? 'admin'
-                  : activeViewerId === 'sender'
-                  ? 'sender'
-                  : activeViewerId === contactItem.id
-                  ? 'invited_user'
-                  : 'other_user';
-              const isViewerTheInvitedUser = canUserSeeAndAcceptInvitation(
-                rec,
-                activeViewerId,
-                viewerRole
-              );
-              const isViewerSender = activeViewerId === 'sender';
-
-              // Hide pending invitations from Admin or other uninvited users
-              const canSeePendingState =
-                status === 'pending' && (isViewerTheInvitedUser || isViewerSender);
 
               return (
                 <div
@@ -2081,36 +1977,32 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                             <span>Friends</span>
                           </span>
                         )}
-                        {canSeePendingState && (
+                        {status === 'pending' && (
                           <span className="text-[9px] bg-amber-500/15 text-amber-500 px-1.5 py-0.2 rounded-full font-bold flex items-center gap-0.5">
                             <Clock className="w-2.5 h-2.5" />
-                            <span>
-                              {isViewerTheInvitedUser ? 'Invited (For You)' : 'Invite Sent'}
-                            </span>
+                            <span>Invite Sent</span>
                           </span>
                         )}
                       </div>
                       <p className="text-[10px] text-slate-400 truncate">
                         {status === 'accepted'
-                          ? 'Friend invite accepted by invited user'
-                          : isViewerTheInvitedUser
-                          ? `You (${contactItem.name.split(' ')[0]}) were invited • Tap Accept`
-                          : isViewerSender && status === 'pending'
-                          ? `Waiting for ${contactItem.name.split(' ')[0]} (only they can see & accept)`
-                          : `${contactItem.nativeLanguage || 'English'} • Private contact`}
+                          ? 'Friend invite accepted'
+                          : status === 'pending'
+                          ? `Invitation sent to ${contactItem.name.split(' ')[0]}`
+                          : `${contactItem.nativeLanguage || 'English'} • Suggested friend`}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {status === 'none' && isViewerSender && (
+                    {status === 'none' && (
                       <button
                         type="button"
                         onClick={() =>
                           handleSetContactInviteStatus(
                             contactItem.id,
                             'pending',
-                            `Sent "Friend Invite" to ${contactItem.name}! Only ${contactItem.name} can see and accept it.`
+                            `Sent "Friend Invite" to ${contactItem.name}!`
                           )
                         }
                         style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}
@@ -2121,8 +2013,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       </button>
                     )}
 
-                    {/* ONLY the invited user can see the invitation action and accept it */}
-                    {status === 'pending' && isViewerTheInvitedUser && (
+                    {status === 'pending' && (
                       <>
                         <button
                           id={`accept-friend-invite-${contactItem.id}`}
@@ -2135,7 +2026,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                             )
                           }
                           className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                          title={`Accept Friend Invite as ${contactItem.name}`}
+                          title={`Accept Friend Invite`}
                         >
                           <Check className="w-3 h-3 stroke-[2.5]" />
                           <span>Accept Invite</span>
@@ -2146,27 +2037,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                             handleSetContactInviteStatus(
                               contactItem.id,
                               'none',
-                              `Friend invite declined by ${contactItem.name}.`
+                              `Friend invite canceled for ${contactItem.name}.`
                             )
                           }
                           className="px-2 py-1.5 rounded-lg text-[10px] text-slate-400 hover:bg-slate-800 cursor-pointer"
                         >
-                          Decline
+                          Cancel
                         </button>
                       </>
-                    )}
-
-                    {status === 'pending' && isViewerSender && (
-                      <span className="px-2 py-1 rounded-lg bg-amber-500/10 text-amber-500 text-[10px] font-bold">
-                        Invited User Only
-                      </span>
-                    )}
-
-                    {status === 'pending' && !isViewerTheInvitedUser && !isViewerSender && (
-                      <span className="px-2 py-1 rounded-lg bg-slate-500/10 text-slate-400 text-[10px] font-semibold flex items-center gap-1">
-                        <Lock className="w-2.5 h-2.5" />
-                        <span>Private</span>
-                      </span>
                     )}
 
                     {status === 'accepted' && (
@@ -2411,6 +2289,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onEditMessageMediaTitle={onEditMessageMediaTitle}
             showSearch={true}
             compact={false}
+            isAdminVerified={isAdminVerified}
           />
         </div>
 
@@ -3275,37 +3154,86 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </button>
           </div>
 
-          {/* Quick Admin Moderation & Reported Media Panel Access Card */}
-          <div
-            onClick={() => onNavigate('admin')}
-            className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
-              isDark
-                ? 'bg-slate-900/75 border-amber-500/30 hover:border-amber-500/60'
-                : 'bg-amber-50/50 border-amber-200 hover:border-amber-400 shadow-2xs'
-            }`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
-                <Shield className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs font-extrabold">
-                    Admin Panel • Reported Media Moderation
-                  </span>
-                  {pendingMediaReportsCount > 0 && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black">
-                      {pendingMediaReportsCount} Pending
-                    </span>
+          {/* Admin-Only Reported Media Moderation (Hidden on User Profile Page for all non-admins, and hidden by default on Profile Page with Admin-only Show/Hide toggle) */}
+          {isAdminVerified && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
+                  <Shield className="w-3 h-3" />
+                  <span>Admin Only • Reported Media Visibility on Profile</span>
+                </span>
+                <button
+                  id="profile-toggle-hide-admin-reported-btn"
+                  type="button"
+                  onClick={() => {
+                    const nextHide = !hideAdminReportedOnProfile;
+                    setHideAdminReportedOnProfile(nextHide);
+                    try {
+                      localStorage.setItem(
+                        'freedom_hide_admin_reported_on_profile_v1',
+                        String(nextHide)
+                      );
+                    } catch {}
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border flex items-center gap-1 cursor-pointer transition-all ${
+                    hideAdminReportedOnProfile
+                      ? isDark
+                        ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                        : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                      : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25'
+                  }`}
+                >
+                  {hideAdminReportedOnProfile ? (
+                    <>
+                      <Eye className="w-3 h-3" />
+                      <span>Show Admin Reported ({pendingMediaReportsCount})</span>
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="w-3 h-3" />
+                      <span>Hide from Profile Page</span>
+                    </>
                   )}
-                </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  Review reported gallery photos & videos and remove forbidden platform content.
-                </p>
+                </button>
               </div>
+
+              {!hideAdminReportedOnProfile && (
+                <div
+                  onClick={() => onNavigate('admin')}
+                  className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                    isDark
+                      ? 'bg-slate-900/75 border-amber-500/30 hover:border-amber-500/60'
+                      : 'bg-amber-50/50 border-amber-200 hover:border-amber-400 shadow-2xs'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+                      <Shield className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-extrabold">
+                          Admin Panel • Reported Media Moderation
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold">
+                          Admin Only
+                        </span>
+                        {pendingMediaReportsCount > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black">
+                            {pendingMediaReportsCount} Pending
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug">
+                        Review reported gallery photos & videos and remove forbidden platform content.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-amber-500 shrink-0" />
+                </div>
+              )}
             </div>
-            <ChevronRight className="w-4 h-4 text-amber-500 shrink-0" />
-          </div>
+          )}
 
           {/* Live Podcast Studio & Audience Chat Shortcut Card */}
           <div
@@ -3817,7 +3745,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         unreadCount={3}
         isAdminVerified={isAdminVerified}
         primaryColor={primaryColor}
-        userAvatar={currentUser?.avatar}
+        userAvatar={persistentUserAvatar}
       />
 
       {/* Device Bottom Home Indicator Bar (iOS style) */}
@@ -3921,13 +3849,87 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           isOpen={Boolean(profileFriendshipModalContact)}
           onClose={() => setProfileFriendshipModalContact(null)}
           contact={profileFriendshipModalContact}
-          currentUserAvatar={currentUser.avatar}
+          currentUserAvatar={persistentUserAvatar}
           currentUserName={currentUser.name}
           userMotherLanguage={motherLanguage}
           messages={messages}
           theme={theme}
           primaryColor={primaryColor}
         />
+      )}
+
+      {/* Full User Profile Avatar Mobile Lightbox Viewer */}
+      {isFullAvatarViewerOpen && (
+        <div
+          id="full-profile-avatar-viewer-modal"
+          onClick={() => setIsFullAvatarViewerOpen(false)}
+          className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-md flex flex-col items-center justify-between p-4 animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md flex items-center justify-between text-white py-2 px-1"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <img
+                src={persistentUserAvatar}
+                alt={currentUser.name}
+                className="w-9 h-9 rounded-full object-cover border border-white/30 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-sm font-extrabold truncate">{currentUser.name}</h3>
+                <p className="text-[11px] text-slate-300 truncate">
+                  @{(currentUser.username || 'sajol_freedom').replace(/^@+/, '')} • Full Profile Avatar
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsFullAvatarViewerOpen(false)}
+              className="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white cursor-pointer"
+              title="Close Full Avatar View"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center w-full max-w-md py-4"
+          >
+            <div className="relative w-72 h-72 sm:w-80 sm:h-80 rounded-3xl overflow-hidden border-4 border-white/20 shadow-2xl bg-slate-900">
+              <img
+                src={persistentUserAvatar}
+                alt={currentUser.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md flex items-center justify-center gap-3 pb-4"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setIsFullAvatarViewerOpen(false);
+                fileInputRef.current?.click();
+              }}
+              style={{ backgroundColor: primaryColor }}
+              className="flex-1 py-3 px-4 rounded-2xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer hover:brightness-110 active:scale-95 transition-all"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Change Profile Avatar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFullAvatarViewerOpen(false)}
+              className="py-3 px-5 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs cursor-pointer transition-all"
+            >
+              Done
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Set Your Fingerprint Modal (Matching Light_18.webp) */}

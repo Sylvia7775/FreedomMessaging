@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { UserContact, ScreenView, ThemeMode } from '../types';
 import { saveContactOrChannelToDb } from '../lib/firebase';
+import { getPersistentUserThumbnail } from '../lib/avatarHelper';
 import { SnapFaceFilterCameraModal } from './SnapFaceFilterCameraModal';
 import {
   VerifiedCheckmarkBadge,
@@ -83,6 +84,7 @@ export const ChatsListScreen: React.FC<ChatsListScreenProps> = ({
   const [filterTab, setFilterTab] = useState<'recent' | 'channels' | 'groups' | 'active' | 'archived'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSnapCameraOpen, setIsSnapCameraOpen] = useState(false);
+  const persistentMyAvatar = getPersistentUserThumbnail({ avatar: userAvatar }, true);
 
   // Local state overrides for optimistic instant UI response (persisted in localStorage for pinned chats)
   const [localArchivedMap, setLocalArchivedMap] = useState<Record<string, boolean>>({});
@@ -567,7 +569,20 @@ export const ChatsListScreen: React.FC<ChatsListScreenProps> = ({
 
         {/* Title & Action Bar */}
         <div className="flex items-center justify-between mt-1 mb-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            <button
+              id="chats-header-my-profile-thumb-btn"
+              type="button"
+              onClick={() => onNavigate('profile')}
+              className="relative w-9 h-9 rounded-full overflow-hidden border-2 border-white/80 shadow-sm shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-transform bg-slate-900"
+              title="My Profile Thumbnail • Tap to open Profile"
+            >
+              <img
+                src={persistentMyAvatar}
+                alt="My Profile Thumbnail"
+                className="w-full h-full object-cover"
+              />
+            </button>
             <h1 className="text-2xl font-extrabold tracking-tight text-white">Chats</h1>
           </div>
 
@@ -974,7 +989,7 @@ export const ChatsListScreen: React.FC<ChatsListScreenProps> = ({
                     title={`View ${contact.name}'s profile & media`}
                   >
                     <img
-                      src={contact.avatar}
+                      src={getPersistentUserThumbnail(contact, false)}
                       alt={contact.name}
                       className={`${
                         contact.isGroup || contact.entityType === 'group'
@@ -1583,7 +1598,7 @@ export const ChatsListScreen: React.FC<ChatsListScreenProps> = ({
         unreadCount={3}
         isAdminVerified={isAdminVerified}
         primaryColor={primaryColor}
-        userAvatar={userAvatar}
+        userAvatar={persistentMyAvatar}
       />
 
       {/* Device Bottom Home Indicator Bar (iOS style) */}

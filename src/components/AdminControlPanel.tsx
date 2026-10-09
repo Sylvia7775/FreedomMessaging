@@ -68,7 +68,15 @@ import {
   ADMIN_2FA_DEFAULT_SECRET,
   ADMIN_2FA_DEFAULT_BACKUP_CODES,
 } from '../lib/twoFactorAuth';
-import { targetAndProcessFaviconFile } from '../lib/firebase';
+import { targetAndProcessFaviconFile, saveUserProfileToDb, saveContactOrChannelToDb } from '../lib/firebase';
+import {
+  VerifiedCheckmarkBadge,
+  getAdminVerificationRequirements,
+  isAccountProfileValidated,
+  rewardUserVerifiedBadgeByAdmin,
+  revokeUserVerifiedBadgeByAdmin,
+  saveUserIdDocumentLocally,
+} from './VerifiedCheckmarkBadge';
 import {
   UploadedNotificationTune,
   loadUploadedNotificationTunes,
@@ -260,6 +268,81 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
   // Contact Account Status Filter: 'all', 'active', or 'blocked'
   const [contactStatusFilter, setContactStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
   const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [verificationRefreshTick, setVerificationRefreshTick] = useState(0);
+
+  React.useEffect(() => {
+    const onValidationUpdated = () => setVerificationRefreshTick((t) => t + 1);
+    window.addEventListener('freedom-profile-validation-updated', onValidationUpdated);
+    return () => window.removeEventListener('freedom-profile-validation-updated', onValidationUpdated);
+  }, []);
+
+  const handleAdminRewardVerifiedBadge = async (targetUser: UserContact) => {
+    const reqs = getAdminVerificationRequirements(targetUser);
+    if (!reqs.meetsRequirements) {
+      showToast(
+        `Cannot verify ${targetUser.name}: User must meet requirements (Profile Image or ID Document Picture).`,
+        'error'
+      );
+      return;
+    }
+    const rewardedAt = rewardUserVerifiedBadgeByAdmin(targetUser.id, adminEmail);
+    setVerificationRefreshTick((t) => t + 1);
+    try {
+      await saveContactOrChannelToDb({
+        ...targetUser,
+        isVerified: true,
+        verifiedByAdmin: true,
+        profileValidatedAt: rewardedAt,
+        verifiedRewardedAt: rewardedAt,
+      });
+      await saveUserProfileToDb({
+        id: targetUser.id,
+        name: targetUser.name,
+        avatar: targetUser.avatar,
+        isVerified: true,
+        profileValidatedAt: rewardedAt,
+      });
+    } catch {}
+    showToast(`Rewarded Verified Badge to ${targetUser.name}! Account is now verified.`);
+  };
+
+  const handleAdminRevokeVerifiedBadge = async (targetUser: UserContact) => {
+    revokeUserVerifiedBadgeByAdmin(targetUser.id);
+    setVerificationRefreshTick((t) => t + 1);
+    try {
+      await saveContactOrChannelToDb({
+        ...targetUser,
+        isVerified: false,
+        verifiedByAdmin: false,
+      });
+      await saveUserProfileToDb({
+        id: targetUser.id,
+        name: targetUser.name,
+        avatar: targetUser.avatar,
+        isVerified: false,
+      });
+    } catch {}
+    showToast(`Revoked Verified Badge from ${targetUser.name}.`);
+  };
+
+  const handleAdminUploadUserIdDocument = (targetUser: UserContact, file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      saveUserIdDocumentLocally(targetUser.id, dataUrl, file.name);
+      setVerificationRefreshTick((t) => t + 1);
+      try {
+        await saveContactOrChannelToDb({
+          ...targetUser,
+          idDocumentUrl: dataUrl,
+          idDocumentName: file.name,
+        });
+      } catch {}
+      showToast(`Uploaded ID Document "${file.name}" for ${targetUser.name}. Ready for verification!`);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Sticker Upload Studio States
   const [stickerName, setStickerName] = useState('');
@@ -2801,8 +2884,15 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                           </div>
 
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <h4 className="text-sm font-bold">{contact.name}</h4>
+                              {isAccountProfileValidated(contact) && (
+                                <VerifiedCheckmarkBadge
+                                  id={`admin-contact-verified-badge-${contact.id}`}
+                                  size="sm"
+                                  title={`${contact.name} • Verified by Admin`}
+                                />
+                              )}
                               {/* Account Status Badge */}
                               {isBlocked ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1">
@@ -2856,6 +2946,118 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                           <span>{contact.lastMessage || 'No recent messages'}</span>
                         </div>
                       )}
+
+                      {/* Admin Verification Requirements & Reward Verified Badge Box */}
+                      {(() => {
+                        void verificationRefreshTick;
+                        const reqs = getAdminVerificationRequirements(contact);
+                        const isVerifiedNow = isAccountProfileValidated(contact);
+                        return (
+                          <div
+                            className={`p-3 rounded-xl border space-y-2 text-xs ${
+                              isDark
+                                ? 'bg-[#12161F]/90 border-slate-800'
+                                : 'bg-slate-50 border-slate-200/80'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="font-extrabold text-[11px] flex items-center gap-1.5">
+                                <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                                <span>Admin Account Verification Requirements</span>
+                              </span>
+                              {reqs.meetsRequirements ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold">
+                                  Meets Requirements ✓
+                                </span>
+                              ) : (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 font-bold">
+                                  Missing Profile Image / ID Doc
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
+                                  reqs.hasProfileImage
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : 'bg-slate-500/15 text-slate-400'
+                                }`}
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Profile Image: {reqs.hasProfileImage ? 'Verified' : 'None'}</span>
+                              </span>
+
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 ${
+                                  reqs.hasIdDocumentPicture
+                                    ? 'bg-sky-500/15 text-sky-400'
+                                    : 'bg-slate-500/15 text-slate-400'
+                                }`}
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>
+                                  ID Document:{' '}
+                                  {reqs.hasIdDocumentPicture ? reqs.idDocumentName || 'Uploaded' : 'None'}
+                                </span>
+                              </span>
+
+                              <label
+                                className="px-2 py-0.5 rounded-md bg-sky-500/15 hover:bg-sky-500/25 text-sky-400 font-bold cursor-pointer flex items-center gap-1 transition-colors"
+                                title="Upload or attach user ID Document Picture for verification"
+                              >
+                                <Upload className="w-3 h-3" />
+                                <span>Upload ID Doc</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleAdminUploadUserIdDocument(contact, file);
+                                    e.target.value = '';
+                                  }}
+                                />
+                              </label>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-1">
+                              {isVerifiedNow ? (
+                                <div className="flex items-center justify-between w-full gap-2">
+                                  <span className="text-[11px] font-bold text-sky-400 flex items-center gap-1.5">
+                                    <VerifiedCheckmarkBadge size="sm" />
+                                    <span>Verified Badge Rewarded by Admin</span>
+                                  </span>
+                                  <button
+                                    id={`admin-revoke-verified-btn-${contact.id}`}
+                                    type="button"
+                                    onClick={() => handleAdminRevokeVerifiedBadge(contact)}
+                                    className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 text-[11px] font-bold cursor-pointer transition-colors"
+                                  >
+                                    Revoke Badge
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  id={`admin-reward-verified-btn-${contact.id}`}
+                                  type="button"
+                                  disabled={!reqs.meetsRequirements}
+                                  onClick={() => handleAdminRewardVerifiedBadge(contact)}
+                                  className={`w-full py-1.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+                                    reqs.meetsRequirements
+                                      ? 'bg-sky-500 hover:bg-sky-400 text-white shadow-xs cursor-pointer active:scale-95'
+                                      : 'bg-slate-700/40 text-slate-400 cursor-not-allowed'
+                                  }`}
+                                  title="Reward user with a Verified Badge if they meet requirements (Profile Image or ID Document Picture)"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                  <span>Reward Verified Badge</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Admin Contact Actions */}
                       <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
@@ -3077,6 +3279,9 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                           <div>
                             <div className="text-xs font-bold flex items-center gap-1.5">
                               <span>{user.name}</span>
+                              {isAccountProfileValidated(user) && (
+                                <VerifiedCheckmarkBadge size="xs" title="Verified by Admin" />
+                              )}
                               {isUserBanned && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 font-bold">
                                   BANNED
@@ -3100,6 +3305,25 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {isAccountProfileValidated(user) ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAdminRevokeVerifiedBadge(user)}
+                              className="text-[11px] font-bold text-slate-400 hover:text-rose-400 cursor-pointer"
+                              title="Revoke Verified Badge"
+                            >
+                              Unverify
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleAdminRewardVerifiedBadge(user)}
+                              className="text-[11px] font-bold text-sky-400 hover:underline cursor-pointer"
+                              title="Reward User with Verified Badge (if Profile Image or ID Document requirements met)"
+                            >
+                              Reward Badge
+                            </button>
+                          )}
                           {isUserBlocked ? (
                             <button
                               onClick={() => handleToggleBlock(user.id, false)}

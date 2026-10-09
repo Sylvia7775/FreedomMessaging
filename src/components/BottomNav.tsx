@@ -1,6 +1,7 @@
 import React from 'react';
-import { MessageSquare, Users, Phone, Shield, User } from 'lucide-react';
+import { MessageSquare, Users, Phone, User } from 'lucide-react';
 import { FooterPageTab, ScreenView, ThemeMode } from '../types';
+import { getPersistentUserThumbnail } from '../lib/avatarHelper';
 
 interface BottomNavProps {
   currentScreen: ScreenView;
@@ -22,6 +23,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   userAvatar,
 }) => {
   const isDark = theme === 'dark';
+  const resolvedProfileAvatar = getPersistentUserThumbnail({ avatar: userAvatar }, true);
 
   return (
     <nav
@@ -109,9 +111,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         }`}
       >
         <div className="w-7 h-7 sm:w-[30px] sm:h-[30px] rounded-full overflow-hidden border-2 border-slate-300 dark:border-slate-600 flex items-center justify-center bg-slate-100 dark:bg-slate-800">
-          {userAvatar ? (
+          {resolvedProfileAvatar ? (
             <img
-              src={userAvatar}
+              src={resolvedProfileAvatar}
               alt="Profile"
               className="w-full h-full object-cover"
             />

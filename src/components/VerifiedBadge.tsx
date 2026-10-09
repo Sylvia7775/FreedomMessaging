@@ -135,32 +135,56 @@ export const VerifiedCheckmarkBadge: React.FC<VerifiedCheckmarkBadgeProps> = ({
 }) => {
   const sizeClasses = {
     xs: 'w-3.5 h-3.5',
-    sm: 'w-4 h-4',
-    md: 'w-4.5 h-4.5',
-    lg: 'w-5 h-5',
+    sm: 'w-[14px] h-[14px]',
+    md: 'w-[15px] h-[15px]',
+    lg: 'w-[16px] h-[16px]',
   }[size];
+
+  const pointsCount = 120;
+  const cx = 50;
+  const cy = 50;
+  const baseR = 42.5;
+  const amp = 4.6;
+  const lobes = 10;
+
+  const buildPath = (yOffset: number = 0) => {
+    const pts: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < pointsCount; i++) {
+      const theta = -Math.PI / 2 + (i * 2 * Math.PI) / pointsCount;
+      const r = baseR + amp * Math.cos(lobes * (theta + Math.PI / 2));
+      pts.push({
+        x: cx + r * Math.cos(theta),
+        y: cy + yOffset + r * Math.sin(theta),
+      });
+    }
+    return (
+      pts
+        .map((p, idx) => `${idx === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+        .join(' ') + ' Z'
+    );
+  };
 
   const badgeSvg = (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 100 100"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={`${sizeClasses} shrink-0 drop-shadow-xs`}
+      className={`${sizeClasses} shrink-0`}
       aria-label={title}
     >
-      {/* Scalloped Verified Seal Polygon */}
+      <path d={buildPath(1.8)} fill="#008FD6" />
+      <path d={buildPath(0)} fill="#00B6FF" />
       <path
-        d="M12 1.75L14.72 3.63L18.01 3.48L19.17 6.57L22 8.25L20.99 11.39L22 14.53L19.17 16.21L18.01 19.3L14.72 19.15L12 21.03L9.28 19.15L5.99 19.3L4.83 16.21L2 14.53L3.01 11.39L2 8.25L4.83 6.57L5.99 3.48L9.28 3.63L12 1.75Z"
-        fill={variant === 'header' ? '#38BDF8' : '#0EA5E9'}
-        stroke={variant === 'header' ? '#FFFFFF' : '#E0F2FE'}
-        strokeWidth="1.5"
+        d="M36.5 52.8L46.2 62.5L65.8 42.2"
+        stroke="#008ED4"
+        strokeWidth="9.5"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* Crisp Inner Checkmark */}
       <path
-        d="M8.5 11.8L10.85 14.15L15.75 9.25"
+        d="M36.5 51.2L46.2 60.9L65.8 40.6"
         stroke="#FFFFFF"
-        strokeWidth="2.3"
+        strokeWidth="9.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

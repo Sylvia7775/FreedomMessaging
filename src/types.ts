@@ -1,4 +1,4 @@
-export type ScreenView = 'login' | 'password_reset' | 'onboarding' | 'chats' | 'chat_detail' | 'people' | 'calls' | 'podcast' | 'profile' | 'admin' | 'about';
+export type ScreenView = 'login' | 'password_reset' | 'onboarding' | 'chats' | 'status' | 'chat_detail' | 'people' | 'calls' | 'podcast' | 'profile' | 'admin' | 'about';
 
 export type FooterPageTab = 'about' | 'terms' | 'feedback' | 'careers' | 'policy';
 
@@ -166,6 +166,10 @@ export interface UserContact {
   hideOnlineStatus?: boolean;
   isVerified?: boolean;
   profileValidatedAt?: string;
+  idDocumentUrl?: string;
+  idDocumentName?: string;
+  verifiedByAdmin?: boolean;
+  verifiedRewardedAt?: string;
 }
 
 export interface UserProfile {
@@ -213,6 +217,10 @@ export interface UserProfile {
   fingerprintRecordedAt?: string;
   isVerified?: boolean;
   profileValidatedAt?: string;
+  idDocumentUrl?: string;
+  idDocumentName?: string;
+  verifiedByAdmin?: boolean;
+  verifiedRewardedAt?: string;
 }
 
 export interface MessageReaction {
@@ -459,5 +467,27 @@ export interface TwoFactorVerifyResult {
   remainingBackupCodes?: string[];
   message: string;
 }
+
+export interface EphemeralStatusItem {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  userThumbnailUrl?: string;
+  isVerified?: boolean;
+  type: 'text' | 'image' | 'video';
+  text?: string;
+  caption?: string;
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  bgColor?: string;
+  fontStyle?: 'sans' | 'serif' | 'mono' | 'bold';
+  createdAt: number; // epoch ms
+  expiresAt: number; // createdAt + 24 * 60 * 60 * 1000
+  viewedByUserIds?: string[];
+  viewsCount?: number;
+  reactions?: { emoji: string; userId: string; userName: string }[];
+}
+
 
 

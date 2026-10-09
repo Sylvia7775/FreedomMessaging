@@ -23,7 +23,6 @@ import {
   Smartphone,
   Cookie,
   FileText,
-  ChevronDown,
   X,
   Fingerprint,
 } from 'lucide-react';
@@ -126,12 +125,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   }, []);
 
   // Cookie Consent Pop-up State on Login Page
-  const [showCookiePopup, setShowCookiePopup] = useState<boolean>(true);
   const [cookiesAccepted, setCookiesAccepted] = useState<boolean>(() => {
     try {
       return localStorage.getItem('freedom_cookie_consent_accepted_v1') === 'true';
     } catch {
       return false;
+    }
+  });
+  const [showCookiePopup, setShowCookiePopup] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('freedom_cookie_consent_accepted_v1') !== 'true';
+    } catch {
+      return true;
     }
   });
   const [showCookieCustomize, setShowCookieCustomize] = useState<boolean>(false);
@@ -140,6 +145,50 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     functional: true,
     analytics: true,
   });
+
+  // Mobile Finger Slide-Up Sheet State for Easy Texting & Login
+  const [isSheetSlidUp, setIsSheetSlidUp] = useState<boolean>(false);
+  const [touchSlideDeltaY, setTouchSlideDeltaY] = useState<number>(0);
+  const touchStartYRef = useRef<number | null>(null);
+  const loginScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const loginFormCardRef = useRef<HTMLDivElement | null>(null);
+
+  const handleTouchStartSlide = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchMoveSlide = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartYRef.current === null || e.touches.length !== 1) return;
+    const deltaY = e.touches[0].clientY - touchStartYRef.current;
+    // Clamp live visual drag feedback
+    setTouchSlideDeltaY(Math.max(-90, Math.min(90, deltaY)));
+  };
+
+  const handleTouchEndSlide = () => {
+    if (touchSlideDeltaY < -24) {
+      // User slid up with finger -> slide login sheet up for easy texting & login
+      setIsSheetSlidUp(true);
+      setShowCookiePopup(false);
+    } else if (touchSlideDeltaY > 32 && (loginScrollContainerRef.current?.scrollTop || 0) <= 12) {
+      // User slid down at top of scroll -> restore full banner
+      setIsSheetSlidUp(false);
+    }
+    touchStartYRef.current = null;
+    setTouchSlideDeltaY(0);
+  };
+
+  const handleInputFocusSlideUp = (e: React.FocusEvent<HTMLInputElement>) => {
+    setIsSheetSlidUp(true);
+    setShowCookiePopup(false);
+    const targetEl = e.currentTarget;
+    setTimeout(() => {
+      try {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {}
+    }, 180);
+  };
 
   // Mandatory Terms of Use & Privacy Policy Reading Gate before proceeding to Profile Page after Login
   const [pendingLegalConsentAuth, setPendingLegalConsentAuth] = useState<{
@@ -615,14 +664,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   return (
     <div
       id="freedom-login-page"
-      className={`min-h-full w-full flex flex-col justify-between select-none transition-colors duration-200 ${
+      ref={loginScrollContainerRef}
+      onTouchStart={handleTouchStartSlide}
+      onTouchMove={handleTouchMoveSlide}
+      onTouchEnd={handleTouchEndSlide}
+      style={{ WebkitOverflowScrolling: 'touch' }}
+      className={`h-full max-h-full w-full overflow-y-auto overscroll-y-contain touch-pan-y scroll-smooth flex flex-col justify-between transition-colors duration-200 ${
         isDark ? 'bg-[#0E121A] text-slate-100' : 'bg-slate-50 text-slate-900'
       }`}
     >
       <StatusBar theme={theme} />
 
       {/* Top Header / Brand Nav */}
-      <div className="flex items-center justify-between px-5 pt-3 pb-2 z-10 shrink-0">
+      <div className="flex items-center justify-between px-4 sm:px-5 pt-2.5 pb-1.5 z-10 shrink-0">
         <div className="flex items-center gap-1.5">
           <Globe className="w-4 h-4 text-emerald-500" />
           <select
@@ -641,59 +695,104 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           </select>
         </div>
 
-        {/* Cookie Consent Trigger Button in Login Header */}
-        <button
-          id="open-login-cookie-popup-btn"
-          type="button"
-          onClick={() => setShowCookiePopup(true)}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all cursor-pointer ${
-            cookiesAccepted
-              ? isDark
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              : isDark
-              ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 animate-pulse'
-              : 'bg-amber-50 border-amber-300 text-amber-800'
-          }`}
-          title="View or update Cookie Consent Preferences"
-        >
-          <Cookie className="w-3.5 h-3.5" />
-          <span>{cookiesAccepted ? 'Cookies Accepted ✓' : 'Cookie Notice'}</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Cookie Consent Trigger Button in Login Header */}
+          <button
+            id="open-login-cookie-popup-btn"
+            type="button"
+            onClick={() => setShowCookiePopup(true)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all cursor-pointer ${
+              cookiesAccepted
+                ? isDark
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : isDark
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 animate-pulse'
+                : 'bg-amber-50 border-amber-300 text-amber-800'
+            }`}
+            title="View or update Cookie Consent Preferences"
+          >
+            <Cookie className="w-3.5 h-3.5" />
+            <span>{cookiesAccepted ? 'Cookies ✓' : 'Cookies'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col items-center justify-center px-5 py-3 w-full max-w-md mx-auto">
-        {/* Brand Banner */}
-        <div className="flex flex-col items-center text-center mb-3">
-          <div className="relative mb-2 transform hover:scale-105 transition-transform duration-300">
-            <div
-              className="absolute inset-0 blur-2xl rounded-full opacity-20 pointer-events-none"
-              style={{ backgroundColor: primaryColor }}
-            />
-            <FreedomLogo
-              appName={brandConfig.appName}
-              customFavicon={brandConfig.faviconUrl}
-              primaryColor={primaryColor}
-              size="lg"
-              theme={theme}
-              showText={false}
-            />
-          </div>
+      {/* Main Content Area — Finger-Slidable Sheet for Easy Mobile Texting & Login */}
+      <div
+        className={`flex-1 flex flex-col items-center px-4 sm:px-5 w-full max-w-md mx-auto transition-all duration-300 ${
+          isSheetSlidUp ? 'justify-start pt-1 pb-44' : 'justify-start sm:justify-center pt-2 pb-36'
+        }`}
+      >
+        {/* Collapsible Brand Banner (slides up compactly when user slides up with finger or focuses input) */}
+        <div
+          className={`flex flex-col items-center text-center transition-all duration-300 overflow-hidden ${
+            isSheetSlidUp ? 'mb-1.5 max-h-14' : 'mb-3 max-h-64'
+          }`}
+        >
+          {isSheetSlidUp ? (
+            <div className="flex items-center gap-2 py-1">
+              <FreedomLogo
+                appName={brandConfig.appName}
+                customFavicon={brandConfig.faviconUrl}
+                primaryColor={primaryColor}
+                size="sm"
+                theme={theme}
+                showText={false}
+              />
+              <span className="text-base font-black tracking-tight">{brandConfig.appName}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold">
+                Encrypted Login
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="relative mb-1.5 transform hover:scale-105 transition-transform duration-300">
+                <div
+                  className="absolute inset-0 blur-2xl rounded-full opacity-20 pointer-events-none"
+                  style={{ backgroundColor: primaryColor }}
+                />
+                <FreedomLogo
+                  appName={brandConfig.appName}
+                  customFavicon={brandConfig.faviconUrl}
+                  primaryColor={primaryColor}
+                  size="lg"
+                  theme={theme}
+                  showText={false}
+                />
+              </div>
 
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-            <span>{brandConfig.appName}</span>
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-xs font-medium">
-            {brandConfig.appDescription ||
-              'Next-generation secure communication with Apache Cordova packaging & 2FA security'}
-          </p>
-          <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-extrabold">
-            <Lock className="w-3 h-3 shrink-0" />
-            <span>Login or Register Required to Access Encrypted Chats</span>
-          </div>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-2">
+                <span>{brandConfig.appName}</span>
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-xs font-medium">
+                {brandConfig.appDescription ||
+                  'Next-generation secure communication with Apache Cordova packaging & 2FA security'}
+              </p>
+              <div className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-extrabold">
+                <Lock className="w-3 h-3 shrink-0" />
+                <span>Login or Register Required to Access Encrypted Chats</span>
+              </div>
+            </>
+          )}
         </div>
 
+        {/* Interactive Finger Slide-Up Login Sheet Container */}
+        <div
+          ref={loginFormCardRef}
+          id="login-slidable-sheet-card"
+          style={{
+            transform:
+              touchSlideDeltaY !== 0
+                ? `translateY(${Math.round(touchSlideDeltaY * 0.35)}px)`
+                : undefined,
+          }}
+          className={`w-full rounded-3xl border p-4 sm:p-5 shadow-xl transition-all duration-200 ${
+            isDark
+              ? 'bg-[#141923]/95 border-slate-800 shadow-black/40'
+              : 'bg-white border-slate-200/90 shadow-slate-900/5'
+          }`}
+        >
         {/* ============================================================== */}
         {/* 2FA AUTHENTICATION CHALLENGE VIEW                             */}
         {/* ============================================================== */}
@@ -998,6 +1097,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       id="signin-identifier-input"
                       type="text"
                       value={signInIdentifier}
+                      onFocus={handleInputFocusSlideUp}
                       onChange={(e) => setSignInIdentifier(e.target.value)}
                       placeholder="admin or mobilephonesky987@gmail.com"
                       className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-xs font-semibold border ${
@@ -1037,6 +1137,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       id="signin-password-input"
                       type={showPassword ? 'text' : 'password'}
                       value={signInPassword}
+                      onFocus={handleInputFocusSlideUp}
                       onChange={(e) => setSignInPassword(e.target.value)}
                       placeholder="Enter password"
                       className={`w-full pl-10 pr-10 py-2.5 rounded-xl text-xs font-semibold border ${
@@ -1193,6 +1294,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     id="reg-name-input"
                     type="text"
                     value={regName}
+                    onFocus={handleInputFocusSlideUp}
                     onChange={(e) => setRegName(e.target.value)}
                     placeholder="e.g. Kristin Watson"
                     className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
@@ -1210,6 +1312,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     id="reg-username-input"
                     type="text"
                     value={regUsername}
+                    onFocus={handleInputFocusSlideUp}
                     onChange={(e) => setRegUsername(e.target.value)}
                     placeholder="e.g. kristin_w"
                     className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
@@ -1227,6 +1330,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     id="reg-email-phone-input"
                     type="text"
                     value={regEmailOrPhone}
+                    onFocus={handleInputFocusSlideUp}
                     onChange={(e) => setRegEmailOrPhone(e.target.value)}
                     placeholder="email@example.com or +1 555-0199"
                     className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
@@ -1245,6 +1349,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         id="reg-password-input"
                         type={showRegPassword ? 'text' : 'password'}
                         value={regPassword}
+                        onFocus={handleInputFocusSlideUp}
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder="Min 4 chars"
                         className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
@@ -1270,6 +1375,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       id="reg-confirm-password-input"
                       type={showRegPassword ? 'text' : 'password'}
                       value={regConfirmPassword}
+                      onFocus={handleInputFocusSlideUp}
                       onChange={(e) => setRegConfirmPassword(e.target.value)}
                       placeholder="Repeat pass"
                       className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
@@ -1382,6 +1488,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             )}
           </>
         )}
+        </div>
       </div>
 
       {/* ================================================================== */}
@@ -1664,27 +1771,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
 
-            {/* Footer Controls: Scroll Helper, Required Checkboxes & Proceed to Profile Button */}
+            {/* Footer Controls: Required Checkboxes & Proceed to Profile Button */}
             <div
               className={`px-5 py-4 border-t space-y-3 shrink-0 ${
                 isDark ? 'bg-[#181F2C] border-slate-800' : 'bg-slate-50 border-slate-200'
               }`}
             >
-              {(!hasReadTermsSection || !hasReadPrivacySection) && (
-                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-[11px] font-semibold">
-                  <span>Please scroll to the bottom to finish reading both sections.</span>
-                  <button
-                    id="scroll-read-legal-btn"
-                    type="button"
-                    onClick={handleScrollDownLegalReader}
-                    className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shrink-0 cursor-pointer hover:brightness-110"
-                  >
-                    <span>Read to Bottom</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-
               {/* Mandatory Checkboxes */}
               <div className="space-y-2">
                 <label

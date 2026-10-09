@@ -328,6 +328,7 @@ export function subscribeUsersFromDb(
           id: docSnap.id,
           name: userName,
           avatar: cleanAvatar,
+          avatarThumbnailUrl: savedLocal?.avatarThumbnailUrl || data.avatarThumbnailUrl || cleanAvatar,
           lastMessage: cleanLastMsg,
           time: data.time || 'Online',
           online: data.online ?? data.isOnline ?? true,
@@ -587,22 +588,43 @@ export async function uploadUserAvatarInDb(
 export async function saveUserProfileToDb(
   profile: Partial<UserProfile> & { id: string; name: string; avatar: string }
 ) {
-  if (profile.avatar) {
+  if (profile.avatar || profile.avatarThumbnailUrl) {
     saveUserAvatarLocally(
       profile.id,
-      profile.avatar,
+      profile.avatar || profile.avatarThumbnailUrl || '',
       profile.avatarFileName,
-      profile.avatarFileSize
+      profile.avatarFileSize,
+      profile.avatarThumbnailUrl
     );
   }
+
+  const savedLocal = getSavedAvatarRecord(profile.id);
+  const resolvedAvatar = getCleanAvatar(
+    profile.name || 'User',
+    savedLocal?.avatar || profile.avatar || profile.avatarThumbnailUrl,
+    undefined,
+    profile.id
+  );
+  const resolvedThumb =
+    profile.avatarThumbnailUrl || savedLocal?.avatarThumbnailUrl || resolvedAvatar;
+
+  // Keep Firestore document compact while preserving real uploaded thumbnail if full avatar is large
+  const firestoreSafeAvatar =
+    resolvedAvatar.length > 350000 && resolvedThumb.length <= 350000
+      ? resolvedThumb
+      : resolvedAvatar;
 
   const userRef = doc(db, 'users', profile.id);
   const cleanData: Record<string, any> = {
     id: profile.id,
     name: (profile.name || 'User').slice(0, 95),
-    avatar: getCleanAvatar(profile.name || 'User', profile.avatar, undefined, profile.id),
+    avatar: firestoreSafeAvatar,
     updatedAt: new Date().toISOString(),
   };
+
+  if (resolvedThumb && resolvedThumb.length <= 350000) {
+    cleanData.avatarThumbnailUrl = resolvedThumb;
+  }
 
   if (profile.username !== undefined) {
     cleanData.username = (profile.username || '').replace(/^@+/, '').slice(0, 48);
@@ -727,13 +749,16 @@ export function subscribeUserProfile(
         const savedLocal = getSavedAvatarRecord(userId);
         const resolvedAvatar = getCleanAvatar(
           data.name || 'Abdullah',
-          savedLocal?.avatar || data.avatar,
+          savedLocal?.avatar || data.avatarThumbnailUrl || data.avatar,
           undefined,
           userId
         );
+        const resolvedThumb =
+          savedLocal?.avatarThumbnailUrl || data.avatarThumbnailUrl || resolvedAvatar;
         onUpdate({
           ...data,
           avatar: resolvedAvatar,
+          avatarThumbnailUrl: resolvedThumb,
           avatarFileName: savedLocal?.avatarFileName || data.avatarFileName,
           avatarFileSize: savedLocal?.avatarFileSize || data.avatarFileSize,
         });
